@@ -137,6 +137,36 @@ class StreamingHandler(BaseHTTPRequestHandler):
                         'description': ev['description'],
                     })
             self.wfile.write(json.dumps(result).encode())
+        elif path.startswith('/api/search'):
+            # Perform semantic search over VLM descriptions
+            from urllib.parse import urlparse, parse_qs
+            
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_cors()
+            self.end_headers()
+            
+            parsed_url = urlparse(self.path)
+            query_params = parse_qs(parsed_url.query)
+            query_text = query_params.get('q', [''])[0]
+            
+            if not query_text or not _api_store:
+                self.wfile.write(json.dumps([]).encode())
+                return
+                
+            results = _api_store.semantic_search(query_text, limit=5)
+            
+            # Filter out the raw embeddings before sending JSON
+            clean_results = []
+            for r in results:
+                clean_results.append({
+                    'camera_id': r['camera_id'],
+                    'timestamp': r['timestamp'],
+                    'description': r['description']
+                })
+                
+            self.wfile.write(json.dumps(clean_results).encode())
         elif path.startswith('/video_feed'):
             # Support /video_feed or /video_feed/cam_01 etc.
             parts = path.rstrip('/').split('/')

@@ -289,11 +289,35 @@ export function IntelligencePanel({
   const flaggedRef = useRef(flaggedEventIds);
   flaggedRef.current = flaggedEventIds;
 
-  const submitQuery = useCallback(() => {
+  const submitQuery = useCallback(async () => {
     const q = query.trim();
     if (!q) return;
-    setQueryResult({ query: q, text: getResponse(q) });
+    
+    setQueryResult({ query: q, text: 'Scanning AI archives...' });
     setQuery('');
+    
+    try {
+      const res = await fetch(`http://localhost:5001/api/search?q=${encodeURIComponent(q)}`);
+      if (!res.ok) throw new Error('API error');
+      const data = await res.json();
+      
+      if (data && data.length > 0) {
+        const top = data[0];
+        const date = new Date(top.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+        
+        let text = `→ ${top.camera_id.toUpperCase()} @ ${date}:\n${top.description}`;
+        
+        if (data.length > 1) {
+             text += `\n\n(+ ${data.length - 1} other semantic matches found)`;
+        }
+        setQueryResult({ query: q, text });
+      } else {
+        setQueryResult({ query: q, text: '→ No matching events found in the recent archives.' });
+      }
+    } catch (e) {
+      console.error("Search API failed, falling back to offline demo data:", e);
+      setQueryResult({ query: q, text: getResponse(q) });
+    }
   }, [query]);
 
   const displayedEvents = (() => {
