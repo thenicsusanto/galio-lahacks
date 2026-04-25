@@ -7,3 +7,4 @@ logs/
 *.mp4
 *.avi
 *.mov
+node_modules/
