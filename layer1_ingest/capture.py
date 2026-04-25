@@ -42,12 +42,21 @@ class CameraCapture:
                         print(f"[{self.camera_id}] Stream ended, retrying in 5s")
                         break
 
-                now = time.monotonic()
-                if now - last_sample < self._frame_interval:
-                    continue
-
-                last_sample = now
-                yield self.camera_id, time.time(), frame
+                if self.source_type == "file":
+                    # Simulate real-time playback for video files
+                    now = time.monotonic()
+                    time_to_wait = last_sample + self._frame_interval - now
+                    if time_to_wait > 0:
+                        time.sleep(time_to_wait)
+                    last_sample = time.monotonic()
+                    yield self.camera_id, time.time(), frame
+                else:
+                    # Drop frames for live streams to keep up with real time
+                    now = time.monotonic()
+                    if now - last_sample < self._frame_interval:
+                        continue
+                    last_sample = now
+                    yield self.camera_id, time.time(), frame
 
             cap.release()
 

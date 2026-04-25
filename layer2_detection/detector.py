@@ -1,6 +1,11 @@
 import cv2
 import numpy as np
-from ultralytics import YOLO
+import os
+import warnings
+import yaml
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=UserWarning)
+    from ultralytics import YOLO
 
 # COCO class IDs we care about for security monitoring
 RELEVANT_CLASSES = {
@@ -8,10 +13,10 @@ RELEVANT_CLASSES = {
     24: "backpack",
     26: "handbag",
     28: "suitcase",
-    2: "car",
+    # 2: "car",
     3: "motorcycle",
-    5: "bus",
-    7: "truck",
+    # 5: "bus",
+    # 7: "truck",
 }
 
 CONFIDENCE_THRESHOLD = 0.4
@@ -19,8 +24,13 @@ CONFIDENCE_THRESHOLD = 0.4
 
 class Detector:
     def __init__(self):
-        # Downloads yolo11n.pt automatically on first run (~6MB)
-        self.model = YOLO("yolo11n.pt")
+        cfg_path = os.path.join(os.path.dirname(__file__), "..", "config.yaml")
+        try:
+            with open(cfg_path) as f:
+                yolo_weights = yaml.safe_load(f).get("models", {}).get("yolo", "yolo26s.pt")
+        except Exception:
+            yolo_weights = "yolo26s.pt"
+        self.model = YOLO(yolo_weights)
 
     def detect(self, frame: np.ndarray) -> tuple[np.ndarray, list[dict]]:
         """
@@ -62,19 +72,24 @@ class Detector:
                 continue
 
             x1, y1, x2, y2 = det["bbox"]
-            face_y2 = y1 + (y2 - y1) // 3  # upper third of bounding box
+            h = y2 - y1
+            w = x2 - x1
+            
+            face_y2 = y1 + h // 6       # only top 1/6th for the head
+            face_x1 = x1 + w // 4       # inset left side
+            face_x2 = x2 - w // 4       # inset right side
 
             # Clamp to frame bounds
-            x1 = max(0, x1)
+            face_x1 = max(0, face_x1)
             y1 = max(0, y1)
-            x2 = min(frame.shape[1], x2)
+            face_x2 = min(frame.shape[1], face_x2)
             face_y2 = min(frame.shape[0], face_y2)
 
-            region = out[y1:face_y2, x1:x2]
+            region = out[y1:face_y2, face_x1:face_x2]
             if region.size == 0:
                 continue
 
             blurred = cv2.GaussianBlur(region, (51, 51), 0)
-            out[y1:face_y2, x1:x2] = blurred
+            out[y1:face_y2, face_x1:face_x2] = blurred
 
         return out

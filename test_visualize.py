@@ -8,9 +8,46 @@ Press Q to quit.
 import multiprocessing as mp
 
 import cv2
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
+import time
 
 from layer1_ingest.ingest import load_config, start_ingest
 from layer2_detection.worker import detection_worker
+
+latest_frame = None
+
+class StreamingHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b'<html><body><h1>Galio Visualization</h1><img src="/video_feed" width="800"></body></html>')
+        elif self.path == '/video_feed':
+            self.send_response(200)
+            self.send_header('Content-type', 'multipart/x-mixed-replace; boundary=frame')
+            self.end_headers()
+            try:
+                while True:
+                    if latest_frame is not None:
+                        ret, jpeg = cv2.imencode('.jpg', latest_frame)
+                        if ret:
+                            self.wfile.write(b'--frame\r\n')
+                            self.send_header('Content-type', 'image/jpeg')
+                            self.send_header('Content-length', str(len(jpeg.tobytes())))
+                            self.end_headers()
+                            self.wfile.write(jpeg.tobytes())
+                            self.wfile.write(b'\r\n')
+                    time.sleep(0.05)
+            except Exception:
+                pass
+        else:
+            self.send_error(404)
+
+def run_server():
+    server = HTTPServer(('', 5000), StreamingHandler)
+    server.serve_forever()
 
 COLORS = {
     "person":     (0, 255, 0),
@@ -54,23 +91,21 @@ def main():
         daemon=True,
     )
     detector_process.start()
-    print("[visualize] Running — press Q to quit\n")
+    threading.Thread(target=run_server, daemon=True).start()
+    print("[visualize] Streaming at http://localhost:5000/ — press Ctrl+C to quit\n")
 
+    global latest_frame
     try:
         while True:
             event = detection_queue.get(timeout=15)
             frame = event["frame"].copy()
             frame = draw_detections(frame, event["detections"])
 
-            cv2.imshow(f"Galio — {event['camera_id']}", frame)
-
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
+            latest_frame = frame
 
     except KeyboardInterrupt:
         pass
     finally:
-        cv2.destroyAllWindows()
         for p in ingest_processes:
             p.terminate()
         detector_process.terminate()

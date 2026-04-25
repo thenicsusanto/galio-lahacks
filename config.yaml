@@ -1,10 +1,16 @@
 ingest:
-  target_fps: 5          # frames per second to sample from each stream
-  queue_maxsize: 30      # max frames buffered per stream before dropping
+  target_fps: 24         # frames per second to sample from each stream
+  queue_maxsize: 60      # max frames buffered per stream before dropping
+
+models:
+  yolo: yolo26s.pt                           # path to YOLO weights file
+  vlm_url: http://localhost:8000/v1/chat/completions
+  vlm_model: Qwen/Qwen2.5-VL-7B-Instruct
 
 cameras:
   - id: cam_01
     type: file
+    # path: footage/Vandalism003_x264.mp4
     path: footage/Shoplifting005_x264.mp4
     loop: true
 
