@@ -1,0 +1,9 @@
+footage/
+__pycache__/
+*.pyc
+*.pyo
+.env
+logs/
+*.mp4
+*.avi
+*.mov

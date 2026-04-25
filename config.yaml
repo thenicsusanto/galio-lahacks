@@ -1,0 +1,20 @@
+ingest:
+  target_fps: 5          # frames per second to sample from each stream
+  queue_maxsize: 30      # max frames buffered per stream before dropping
+
+cameras:
+  - id: cam_01
+    type: file
+    path: footage/Shoplifting005_x264.mp4
+    loop: true
+
+  # - id: cam_02
+  #   type: file
+  #   path: footage/clip2.mp4
+  #   loop: true
+
+  # Uncomment and set your phone's IP to use RTSP
+  # - id: cam_rtsp
+  #   type: rtsp
+  #   url: rtsp://192.168.1.100:8080/h264_ulaw.sdp
+  #   loop: false
