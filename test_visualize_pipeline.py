@@ -12,8 +12,11 @@ import cv2
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import time
+import sys
+profile_log = open('profile.log', 'a')
 
 from layer1_ingest.ingest import load_config, start_ingest
+from layer1_ingest.worker import ingest_worker
 from layer2_detection.worker import detection_worker
 from layer3_vlm.prompt import build_prompt
 from layer3_vlm.vlm import query_vlm
@@ -25,13 +28,22 @@ latest_frame = {}
 latest_description = ""
 _api_store = None
 
+# Dynamic camera management
+_managed_cameras: dict = {}   # camera_id -> config dict
+_ingest_processes: dict = {}  # camera_id -> mp.Process
+_vlm_queues: dict = {}        # camera_id -> Queue (for stopping workers on removal)
+_last_frame: dict = {}        # camera_id -> last rendered frame
+_frame_queue_ref = None
+_target_fps_ref = 24
+_cameras_lock = threading.Lock()
+
 class StreamingHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # suppress per-request logs
 
     def send_cors(self):
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
 
     def do_OPTIONS(self):
@@ -92,14 +104,17 @@ class StreamingHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(latest_description.encode('utf-8') if latest_description else b'Waiting for analysis...')
         elif path == '/api/cameras':
-            # Returns the list of live camera IDs seen by the pipeline
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.send_header('Cache-Control', 'no-cache')
             self.send_cors()
             self.end_headers()
-            cam_ids = list(latest_frame.keys())
-            self.wfile.write(json.dumps(cam_ids).encode())
+            with _cameras_lock:
+                result = [
+                    {**cfg, 'online': _ingest_processes.get(cid, None) is not None and _ingest_processes[cid].is_alive()}
+                    for cid, cfg in _managed_cameras.items()
+                ]
+            self.wfile.write(json.dumps(result).encode())
         elif path == '/api/events':
             # Returns the most recent VLM event per camera as a JSON array
             self.send_response(200)
@@ -151,6 +166,77 @@ class StreamingHandler(BaseHTTPRequestHandler):
         else:
             self.send_error(404)
 
+    def do_POST(self):
+        path = self.path.split('?')[0]
+        if path == '/api/cameras':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length)
+            try:
+                camera_cfg = json.loads(body)
+                cam_id = camera_cfg.get('id', '').strip()
+                if not cam_id:
+                    self.send_response(400)
+                    self.send_cors()
+                    self.end_headers()
+                    self.wfile.write(b'{"error": "id required"}')
+                    return
+                with _cameras_lock:
+                    if cam_id in _ingest_processes:
+                        self.send_response(409)
+                        self.send_cors()
+                        self.end_headers()
+                        self.wfile.write(b'{"error": "camera already exists"}')
+                        return
+                    p = mp.Process(
+                        target=ingest_worker,
+                        args=(camera_cfg, _target_fps_ref, _frame_queue_ref),
+                        name=f"ingest-{cam_id}",
+                        daemon=True,
+                    )
+                    p.start()
+                    _ingest_processes[cam_id] = p
+                    _managed_cameras[cam_id] = camera_cfg
+                self.send_response(201)
+                self.send_header('Content-type', 'application/json')
+                self.send_cors()
+                self.end_headers()
+                self.wfile.write(json.dumps({'id': cam_id, 'status': 'started'}).encode())
+            except Exception as e:
+                self.send_response(500)
+                self.send_cors()
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}).encode())
+        else:
+            self.send_error(404)
+
+    def do_DELETE(self):
+        path = self.path.split('?')[0]
+        if path.startswith('/api/cameras/'):
+            cam_id = path[len('/api/cameras/'):]
+            with _cameras_lock:
+                if cam_id not in _ingest_processes:
+                    self.send_response(404)
+                    self.send_cors()
+                    self.end_headers()
+                    self.wfile.write(b'{"error": "not found"}')
+                    return
+                _ingest_processes[cam_id].terminate()
+                del _ingest_processes[cam_id]
+                del _managed_cameras[cam_id]
+                latest_frame.pop(cam_id, None)
+                _last_frame.pop(cam_id, None)
+                # Send sentinel to stop the VLM worker thread for this camera
+                if cam_id in _vlm_queues:
+                    _vlm_queues[cam_id].put(None)
+                    del _vlm_queues[cam_id]
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_cors()
+            self.end_headers()
+            self.wfile.write(b'{"status": "removed"}')
+        else:
+            self.send_error(404)
+
 def run_server():
     server = ThreadingHTTPServer(('', 5001), StreamingHandler)
     server.serve_forever()
@@ -168,6 +254,7 @@ COLORS = {
 
 
 def draw_detections(frame, detections):
+    start = time.monotonic()
     for det in detections:
         x1, y1, x2, y2 = det["bbox"]
         label = det["label"]
@@ -184,6 +271,8 @@ def draw_detections(frame, detections):
         cv2.rectangle(frame, (x1, y1 - th - 6), (x1 + tw + 4, y1), color, -1)
         cv2.putText(frame, text, (x1 + 2, y1 - 4),
                     cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), thickness)
+    elapsed = time.monotonic() - start
+    print(f"[profile] draw_detections: {elapsed*1000:.2f} ms", file=profile_log, flush=True)
     return frame
 
 
@@ -192,21 +281,31 @@ def vlm_worker(vlm_queue: queue.Queue, store: EventStore):
     global latest_description
     import numpy as np
     import collections
-    
+
     # Keep a sliding window of the last 120 frames (~5s at 24fps)
-    # This guarantees the VLM always sees a wide temporal context, 
+    # This guarantees the VLM always sees a wide temporal context,
     # even when inference runs too fast to let the queue fill up naturally.
     frame_buffer = collections.deque(maxlen=120)
-    
+
     while True:
-        frame_buffer.append(vlm_queue.get())
+        t0 = time.monotonic()
+        item = vlm_queue.get()
+        t1 = time.monotonic()
+        print(f"[profile] VLM queue wait: {(t1-t0)*1000:.2f} ms", file=profile_log, flush=True)
+        if item is None:  # sentinel: camera was removed
+            return
+        frame_buffer.append(item)
         while not vlm_queue.empty():
             try:
-                frame_buffer.append(vlm_queue.get_nowait())
+                item = vlm_queue.get_nowait()
+                if item is None:
+                    return
+                frame_buffer.append(item)
             except queue.Empty:
                 break
                 
         buffer_list = list(frame_buffer)
+        t2 = time.monotonic()
         if len(buffer_list) > 4:
             indices = np.linspace(0, len(buffer_list) - 1, 4, dtype=int)
             items = [buffer_list[i] for i in indices]
@@ -228,7 +327,10 @@ def vlm_worker(vlm_queue: queue.Queue, store: EventStore):
         history = [e for e in recent_events if e["timestamp"] != timestamp]
 
         prompt = build_prompt(detections, history)
+        t3 = time.monotonic()
         description = query_vlm(frames, prompt)
+        t4 = time.monotonic()
+        print(f"[profile] VLM build_prompt: {(t3-t2)*1000:.2f} ms, query_vlm: {(t4-t3)*1000:.2f} ms", file=profile_log, flush=True)
 
         store.set_description(camera_id, timestamp, description)
         latest_description = f"[{camera_id}] {description}"
@@ -236,9 +338,13 @@ def vlm_worker(vlm_queue: queue.Queue, store: EventStore):
 
 def main():
     config = load_config("config.yaml")
+    t_ingest_start = time.monotonic()
     frame_queue, ingest_processes = start_ingest(config)
+    t_ingest_end = time.monotonic()
+    print(f"[profile] start_ingest: {(t_ingest_end-t_ingest_start)*1000:.2f} ms", file=profile_log, flush=True)
 
     detection_queue: mp.Queue = mp.Queue(maxsize=50)
+    t_det_start = time.monotonic()
     detector_process = mp.Process(
         target=detection_worker,
         args=(frame_queue, detection_queue),
@@ -246,53 +352,73 @@ def main():
         daemon=True,
     )
     detector_process.start()
+    t_det_end = time.monotonic()
+    print(f"[profile] start detection_worker: {(t_det_end-t_det_start)*1000:.2f} ms", file=profile_log, flush=True)
 
     store = EventStore()
-    global _api_store
+    global _api_store, _frame_queue_ref, _target_fps_ref
     _api_store = store
+    _frame_queue_ref = frame_queue
+    _target_fps_ref = config['ingest']['target_fps']
+    with _cameras_lock:
+        for proc in ingest_processes:
+            cam_id = proc.name.replace('ingest-', '')
+            _ingest_processes[cam_id] = proc
+        for cam_cfg in config['cameras']:
+            _managed_cameras[cam_cfg['id']] = cam_cfg
     
-    # Track a separate VLM queue and worker thread per camera
-    vlm_queues = {}
     vlm_threads = {}
 
     threading.Thread(target=run_server, daemon=True).start()
     print("[visualize] Streaming at http://localhost:5001/ — press Ctrl+C to quit\n")
 
-    last_frame = {}  # camera_id -> last rendered frame, shown while waiting for next
-    global latest_frame, latest_description
+    global latest_frame, latest_description, _vlm_queues, _last_frame
 
     try:
         while True:
+            t_loop_start = time.monotonic()
             try:
                 item = detection_queue.get_nowait()
+                t_got_item = time.monotonic()
                 cam = item["camera_id"]
+
+                # Discard results for cameras that were removed while frames were in-flight
+                with _cameras_lock:
+                    if cam not in _managed_cameras:
+                        continue
+
                 frame = item["frame"].copy()
                 frame = draw_detections(frame, item["detections"])
-                last_frame[cam] = frame
-                
-                # We pass the clean frame to the VLM (without bounding boxes) 
-                # because thick bounding box lines and text can obscure fine-grained physical 
+                _last_frame[cam] = frame
+
+                # We pass the clean frame to the VLM (without bounding boxes)
+                # because thick bounding box lines and text can obscure fine-grained physical
                 # interactions like a foot striking a motorcycle.
                 # Dynamically spawn a VLM worker for new cameras
-                if cam not in vlm_queues:
-                    vlm_queues[cam] = queue.Queue(maxsize=100)
+                if cam not in _vlm_queues:
+                    _vlm_queues[cam] = queue.Queue(maxsize=100)
                     t = threading.Thread(
                         target=vlm_worker,
-                        args=(vlm_queues[cam], store),
+                        args=(_vlm_queues[cam], store),
                         daemon=True,
                     )
                     t.start()
                     vlm_threads[cam] = t
-                
+
                 try:
-                    vlm_queues[cam].put_nowait(item)
+                    _vlm_queues[cam].put_nowait(item)
                 except queue.Full:
                     pass
+                t_after_vlm = time.monotonic()
+                print(f"[profile] detection_queue.get: {(t_got_item-t_loop_start)*1000:.2f} ms, put to VLM: {(t_after_vlm-t_got_item)*1000:.2f} ms", file=profile_log, flush=True)
             except queue.Empty:
                 pass
 
-            for cam, frame in last_frame.items():
+            for cam, frame in _last_frame.items():
                 latest_frame[cam] = frame
+
+            t_loop_end = time.monotonic()
+            print(f"[profile] main loop iteration: {(t_loop_end-t_loop_start)*1000:.2f} ms", file=profile_log, flush=True)
 
             time.sleep(0.03)
 

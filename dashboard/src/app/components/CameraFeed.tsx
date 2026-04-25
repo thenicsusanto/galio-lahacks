@@ -432,15 +432,6 @@ export function CameraFeed({
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[10.5px] tabular-nums" style={{ fontFamily: "'DM Mono', monospace", color: '#c9a84caa', textShadow: '0 0 8px #c9a84c66' }}>{ts}</span>
-            <span
-              style={{
-                display: 'inline-block',
-                width: 8, height: 8,
-                clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
-                background: scoreCol,
-                boxShadow: `0 0 8px ${scoreCol}`,
-              }}
-            />
           </div>
         </div>
       )}

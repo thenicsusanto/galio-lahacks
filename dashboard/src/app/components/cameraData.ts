@@ -121,14 +121,24 @@ export const cameras: CameraData[] = [
   },
 ];
 
+export interface Detection {
+  label: string;
+  confidence: number;
+  bbox: number[];
+}
+
 export interface AlertEvent {
   id: number;
   time: string;
+  timestamp: number;
   cam: number;
-  camera_id?: string;   // real camera id string from pipeline e.g. "cam_01"
+  camera_id?: string;
   type: string;
   details: string;
   severity: 'critical' | 'warning' | 'info';
+  score: number;
+  action_required: 'Immediate' | 'Monitor' | 'Log';
+  detections: Detection[];
 }
 
 export const INITIAL_EVENTS: AlertEvent[] = [

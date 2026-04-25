@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Bot, Send, Bookmark, BookmarkCheck, Maximize2, Wifi, WifiOff } from 'lucide-react';
-import { AlertEvent, INITIAL_EVENTS } from './cameraData';
+import { AlertEvent } from './cameraData';
 import { usePipeline } from '../hooks/usePipeline';
 
 // ─── Query responses ───────────────────────────────────────────────────────
@@ -19,35 +19,40 @@ function getResponse(q: string) {
   return '→ No matching events found in the last 10 minutes.';
 }
 
-// ─── Severity helpers ──────────────────────────────────────────────────────
+// ─── Priority helpers ──────────────────────────────────────────────────────
 const SEV_COLOR: Record<string, string> = {
   critical: '#e8607a',
   warning:  '#e8a840',
   info:     '#7a96e8',
 };
 
-const SEV_LABEL: Record<string, string> = {
-  critical: 'Critical',
-  warning:  'Warning',
-  info:     'Info',
+const PRIORITY_LABEL: Record<string, string> = {
+  Immediate: 'IMMEDIATE',
+  Monitor:   'MONITOR',
+  Log:       'LOG',
 };
 
-// Per-event-type severity scores
-const TYPE_SCORE: Record<string, number> = {
-  LOITERING_ALERT:   9.2,
-  BAG_UNATTENDED:    8.7,
-  MOTION_DETECTED:   2.6,
-  PERSON_DETECTED:   3.1,
-  VEHICLE_DETECTED:  3.4,
-  VEHICLE_MOVING:    3.4,
-};
+function getPriorityLabel(ev: AlertEvent): string {
+  return PRIORITY_LABEL[ev.action_required] ?? PRIORITY_LABEL.Log;
+}
+
 function getScore(ev: AlertEvent): number {
-  return TYPE_SCORE[ev.type] ?? (ev.severity === 'critical' ? 8.5 : ev.severity === 'warning' ? 6.0 : 3.0);
+  // Use real VLM score (0–1) scaled to /10, fall back to severity estimate
+  if (ev.score > 0) return ev.score * 10;
+  return ev.severity === 'critical' ? 8.5 : ev.severity === 'warning' ? 6.0 : 3.0;
 }
 
 // Humanise event type: LOITERING_ALERT → Loitering Alert
 function fmtType(t: string) {
   return t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function fmtRelative(timestamp: number, now: number): string {
+  const diff = Math.floor(now / 1000 - timestamp);
+  if (diff < 10) return 'just now';
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  return `${Math.floor(diff / 3600)}h ago`;
 }
 
 type LogTab = 'all' | 'warnings' | 'flagged';
@@ -73,11 +78,13 @@ function useClickHandler(onSingle: () => void, onDouble: () => void, delay = 220
 function EventRow({
   ev,
   flagged,
+  now,
   onToggleFlag,
   onZoom,
 }: {
   ev: AlertEvent;
   flagged: boolean;
+  now: number;
   onToggleFlag: () => void;
   onZoom: () => void;
 }) {
@@ -114,7 +121,7 @@ function EventRow({
             letterSpacing: '0.06em',
           }}
         >
-          {ev.time}
+          {ev.timestamp ? fmtRelative(ev.timestamp, now) : ev.time}
         </span>
         <div className="flex items-center gap-2">
           <span
@@ -155,7 +162,25 @@ function EventRow({
         {fmtType(ev.type)}
       </div>
 
-      {/* Row 3: Severity label + Score bar */}
+      {/* Row 3: Rationale */}
+      {ev.details && (
+        <div
+          style={{
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 11.5,
+            color: '#6a7f9a',
+            lineHeight: 1.5,
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+        >
+          {ev.details}
+        </div>
+      )}
+
+      {/* Row 4: Severity label + Score bar */}
       <div className="flex items-center justify-between gap-3">
         <span
           className="px-1.5 py-0.5"
@@ -169,7 +194,7 @@ function EventRow({
             textShadow: `0 0 8px ${col}66`,
           }}
         >
-          {SEV_LABEL[ev.severity].toUpperCase()}
+          {getPriorityLabel(ev)}
         </span>
 
         {/* Score */}
@@ -232,14 +257,19 @@ export function IntelligencePanel({
   const [query, setQuery]             = useState('');
   const [queryResult, setQueryResult] = useState<{ text: string; query: string } | null>(null);
   const [logTab, setLogTab]           = useState<LogTab>('all');
+  const [now, setNow]                 = useState(Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
   const logRef  = useRef<HTMLDivElement>(null);
 
   // Real pipeline data
   const { events: pipelineEvents, isLive } = usePipeline();
 
   // Merge real pipeline events on top of initial seed events
-  const [localEvents, setLocalEvents] = useState<AlertEvent[]>(INITIAL_EVENTS);
-  const nextId  = useRef(INITIAL_EVENTS[0].id + 1);
+  const [localEvents, setLocalEvents] = useState<AlertEvent[]>([]);
 
   // When pipeline events arrive, prepend them to localEvents
   useEffect(() => {
@@ -439,6 +469,7 @@ export function IntelligencePanel({
                 key={ev.id}
                 ev={ev}
                 flagged={flaggedEventIds.includes(ev.id)}
+                now={now}
                 onToggleFlag={() => onToggleFlag(ev.id)}
                 onZoom={() => onZoomCamera(ev.cam)}
               />

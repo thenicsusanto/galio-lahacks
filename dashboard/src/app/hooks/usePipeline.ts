@@ -19,13 +19,24 @@ interface RawEvent {
 }
 
 // Parse a JSON description produced by the VLM (which returns a JSON string)
-function parseDescription(raw: string): { type: string; details: string; severity: 'critical' | 'warning' | 'info'; score: number } {
+interface ParsedDescription {
+  type: string;
+  details: string;
+  severity: 'critical' | 'warning' | 'info';
+  score: number;
+  action_required: 'Immediate' | 'Monitor' | 'Log';
+}
+
+function parseDescription(raw: string): ParsedDescription {
   try {
     const obj = JSON.parse(raw);
     const category: string = obj.category ?? 'None';
     const score: number = typeof obj.anomaly_score === 'number' ? obj.anomaly_score : 0;
     const rationale: string = obj.rationale ?? raw;
-    const action: string = obj.action_required ?? 'Log';
+    const action: 'Immediate' | 'Monitor' | 'Log' =
+      obj.action_required === 'Immediate' ? 'Immediate'
+      : obj.action_required === 'Monitor' ? 'Monitor'
+      : 'Log';
 
     let severity: 'critical' | 'warning' | 'info' = 'info';
     if (action === 'Immediate' || score >= 0.7) severity = 'critical';
@@ -33,32 +44,33 @@ function parseDescription(raw: string): { type: string; details: string; severit
 
     const type = category === 'None' ? 'MOTION_DETECTED' : category.toUpperCase().replace(/\s+/g, '_');
 
-    return { type, details: rationale, severity, score };
+    return { type, details: rationale, severity, score, action_required: action };
   } catch {
-    // If VLM output isn't valid JSON, treat as an info detection
-    return { type: 'MOTION_DETECTED', details: raw, severity: 'info', score: 0 };
+    return { type: 'MOTION_DETECTED', details: raw, severity: 'info', score: 0, action_required: 'Log' };
   }
 }
 
 let _nextId = 1000;
 
 function rawToAlertEvent(raw: RawEvent): AlertEvent {
-  const { type, details, severity } = parseDescription(raw.description);
+  const { type, details, severity, score, action_required } = parseDescription(raw.description);
   const ts = new Date(raw.timestamp * 1000);
   const time = ts.toLocaleTimeString('en-GB', { hour12: false });
-  // Extract numeric part from camera id for cam field (cam_01 → 1)
   const camMatch = raw.camera_id.match(/\d+/);
   const cam = camMatch ? parseInt(camMatch[0], 10) : 1;
   return {
     id: _nextId++,
     time,
+    timestamp: raw.timestamp,
     cam,
+    camera_id: raw.camera_id,
     type,
     details,
     severity,
-    // Store camera_id string for video feed URL
-    camera_id: raw.camera_id,
-  } as AlertEvent & { camera_id: string };
+    score,
+    action_required,
+    detections: raw.detections,
+  };
 }
 
 export function usePipeline() {

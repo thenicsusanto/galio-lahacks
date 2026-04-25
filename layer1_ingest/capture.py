@@ -22,40 +22,51 @@ class CameraCapture:
     def frames(self):
         """Generator that yields (camera_id, timestamp, frame) tuples at target_fps."""
         while True:
-            cap = cv2.VideoCapture(self._source)
+            cap = cv2.VideoCapture(self._source, cv2.CAP_FFMPEG)
             if not cap.isOpened():
                 print(f"[{self.camera_id}] Failed to open source: {self._source}")
                 time.sleep(5)
                 continue
 
+            if self.source_type == "rtsp":
+                # Keep only 1 frame in the decode buffer to minimize latency.
+                # Without this OpenCV/FFMPEG buffers several seconds of video.
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
             last_sample = 0.0
 
             while True:
-                ret, frame = cap.read()
-
-                if not ret:
-                    # End of file or stream dropped
-                    if self.loop and self.source_type == "file":
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                if self.source_type == "rtsp":
+                    # For live streams: skip frames that we don't need to sample
+                    # using grab() (advances the buffer without a full decode) so
+                    # we always consume the stream in real time without CPU waste.
+                    now = time.monotonic()
+                    if now - last_sample < self._frame_interval:
+                        if not cap.grab():
+                            print(f"[{self.camera_id}] Stream ended, retrying in 5s")
+                            break
                         continue
-                    else:
+                    ret, frame = cap.read()
+                    if not ret:
                         print(f"[{self.camera_id}] Stream ended, retrying in 5s")
                         break
-
-                if self.source_type == "file":
+                    last_sample = now
+                    yield self.camera_id, time.time(), frame
+                else:
+                    ret, frame = cap.read()
+                    if not ret:
+                        if self.loop:
+                            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                            continue
+                        else:
+                            print(f"[{self.camera_id}] Stream ended, retrying in 5s")
+                            break
                     # Simulate real-time playback for video files
                     now = time.monotonic()
                     time_to_wait = last_sample + self._frame_interval - now
                     if time_to_wait > 0:
                         time.sleep(time_to_wait)
                     last_sample = time.monotonic()
-                    yield self.camera_id, time.time(), frame
-                else:
-                    # Drop frames for live streams to keep up with real time
-                    now = time.monotonic()
-                    if now - last_sample < self._frame_interval:
-                        continue
-                    last_sample = now
                     yield self.camera_id, time.time(), frame
 
             cap.release()

@@ -9,11 +9,6 @@ const FLOOR_MAP: Record<string, number | null> = {
   'All': null, 'Floor 1': 1, 'Floor 2': 2, 'Parking': 0,
 };
 
-const LEGEND = [
-  { color: '#34d399', label: 'Normal' },
-  { color: '#fbbf24', label: 'Review' },
-  { color: '#f87171', label: 'Incident' },
-];
 
 // ── Real pipeline video tile ────────────────────────────────────────────────
 function PipelineCamTile({
@@ -21,11 +16,13 @@ function PipelineCamTile({
   flashing = false,
   selected = false,
   onSelect,
+  onDoubleClick,
 }: {
   cameraId: string;
   flashing?: boolean;
   selected?: boolean;
   onSelect: () => void;
+  onDoubleClick?: () => void;
 }) {
   const scoreCol = '#34d399'; // green — live means healthy
   const clipNormal = 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))';
@@ -33,6 +30,7 @@ function PipelineCamTile({
   return (
     <div
       onClick={onSelect}
+      onDoubleClick={onDoubleClick}
       className={`relative overflow-hidden cursor-pointer group ${flashing ? 'cam-flashing' : ''}`}
       style={{
         background: '#07090e',
@@ -76,15 +74,6 @@ function PipelineCamTile({
             {cameraId.toUpperCase().replace(/_/g, ' ')}
           </span>
         </div>
-        <span
-          style={{
-            display: 'inline-block',
-            width: 8, height: 8,
-            clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
-            background: scoreCol,
-            boxShadow: `0 0 8px ${scoreCol}`,
-          }}
-        />
       </div>
 
       {/* Hover highlight */}
@@ -108,6 +97,7 @@ export function CameraGrid({
   const [search, setSearch] = useState('');
   const [floor, setFloor] = useState('All');
   const [selectedCam, setSelectedCam] = useState<number | null>(null);
+  const [focusedLiveCam, setFocusedLiveCam] = useState<string | null>(null);
   const { cameras: liveCamIds } = usePipeline();
 
   const filtered = cameras.filter((c) => {
@@ -200,6 +190,57 @@ export function CameraGrid({
     );
   }
 
+  // ── Live Camera Focus View ──────────────────────────────────────────────
+  if (focusedLiveCam) {
+    const otherLiveCams = liveCamIds.filter(id => id !== focusedLiveCam);
+    return (
+      <main className="flex flex-col flex-1 min-w-0" style={{ background: '#0b0c14' }}>
+        <div
+          className="flex items-center gap-3 px-4 shrink-0 relative"
+          style={{ height: 48, borderBottom: '1px solid #c9a84c22', background: 'linear-gradient(90deg, #0f1120 0%, #0d0f1a 100%)' }}
+        >
+          <div className="absolute left-0 top-0 bottom-0" style={{ width: 3, background: 'linear-gradient(180deg, #c9a84c, #c9a84c44)', boxShadow: '0 0 10px #c9a84c66' }} />
+          <span className="inline-block animate-pulse" style={{ width: 7, height: 7, clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)', background: '#f87171', boxShadow: '0 0 8px #f87171' }} />
+          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: '#ccd4ea', letterSpacing: '0.02em' }}>
+            {focusedLiveCam.toUpperCase().replace(/_/g, ' ')}
+          </span>
+          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: '#c9a84c88' }}>— Focused View</span>
+          <div className="ml-auto">
+            <button
+              onClick={() => setFocusedLiveCam(null)}
+              className="flex items-center gap-1.5 px-3 py-1.5"
+              style={{ clipPath: 'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 6px 100%, 0 calc(100% - 6px))', background: 'rgba(201,168,76,0.08)', border: 'none', color: '#c9a84c88', fontSize: 11, fontFamily: "'Inter', sans-serif", cursor: 'pointer' }}
+            >
+              <Minimize2 size={11} />
+              <span>Exit Focus</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 p-3 min-h-0" onDoubleClick={() => setFocusedLiveCam(null)}>
+          <div className="h-full overflow-hidden" style={{ clipPath: 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))', border: '1.5px solid #34d39944' }}>
+            <img
+              src={`/video_feed/${focusedLiveCam}`}
+              className="block w-full h-full object-cover"
+              alt={focusedLiveCam}
+              style={{ background: '#07090e' }}
+            />
+          </div>
+        </div>
+
+        {otherLiveCams.length > 0 && (
+          <div className="flex gap-2 px-3 pb-3 shrink-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+            {otherLiveCams.map(camId => (
+              <div key={camId} className="shrink-0" style={{ width: 160 }}>
+                <PipelineCamTile cameraId={camId} selected={false} onSelect={() => setFocusedLiveCam(camId)} />
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+    );
+  }
+
   // ── Normal Grid View ────────────────────────────────────────────────────
   return (
     <main className="flex flex-col flex-1 min-w-0" style={{ background: '#0b0c14' }}>
@@ -234,7 +275,7 @@ export function CameraGrid({
             }}
           >
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
-            {cameras.length} active
+            {liveCamIds.length > 0 ? liveCamIds.length : cameras.length} active
           </span>
         </div>
 
@@ -262,20 +303,6 @@ export function CameraGrid({
           <SlidersHorizontal size={14} color="#c9a84c99" />
         </div>
 
-        {/* Legend */}
-        <div className="flex items-center gap-3 ml-auto">
-          {LEGEND.map(({ color, label }) => (
-            <div key={label} className="flex items-center gap-1.5">
-              <div style={{
-                width: 7, height: 7,
-                clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
-                background: color,
-                boxShadow: `0 0 6px ${color}`,
-              }} />
-              <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, color: '#48607a' }}>{label}</span>
-            </div>
-          ))}
-        </div>
 
         {/* Bottom glow line */}
         <div className="absolute bottom-0 left-0 right-0" style={{ height: 1, background: 'linear-gradient(90deg, #c9a84c66, transparent 60%)' }} />
@@ -290,7 +317,7 @@ export function CameraGrid({
             </span>
           </div>
         ) : (
-          <div className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(${Math.min((filtered.length + liveCamIds.length) <= 1 ? 1 : (filtered.length + liveCamIds.length) <= 4 ? 2 : 3, 3)}, 1fr)` }}>
+          <div className="grid gap-2.5" style={{ gridTemplateColumns: (() => { const n = liveCamIds.length > 0 ? liveCamIds.length : filtered.length; return `repeat(${n <= 4 ? 2 : 3}, 1fr)`; })() }}>
             {/* Real pipeline cameras first */}
             {liveCamIds.map((camId) => (
               <PipelineCamTile
@@ -298,7 +325,7 @@ export function CameraGrid({
                 cameraId={camId}
                 flashing={false}
                 selected={false}
-                onSelect={() => {}}
+                onSelect={() => setFocusedLiveCam(camId)}
               />
             ))}
             {/* Demo animated tiles only shown when no live cameras */}

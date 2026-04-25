@@ -24,9 +24,9 @@ STUB_MODE = False  # set True if vLLM is not available
 
 
 def frame_to_base64(frame: np.ndarray) -> str:
-    # Resize to speed up VLM processing (fewer visual tokens)
+    # Aggressively resize to speed up VLM processing (fewer visual tokens)
     h, w = frame.shape[:2]
-    max_dim = 1024  # Increased to 1024 for higher visual fidelity so it can detect fine-grained actions
+    max_dim = 512  # Downscale to 512px max dimension for lower token count
     if max(h, w) > max_dim:
         scale = max_dim / max(h, w)
         frame = cv2.resize(frame, (int(w * scale), int(h * scale)))
