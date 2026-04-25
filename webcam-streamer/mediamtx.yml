@@ -1,0 +1,28 @@
+###############################################################################
+# mediamtx.yml — minimal config for webcam RTSP relay
+# Stream URL:  rtsp://<your-ip>:8554/webcam
+###############################################################################
+
+# Logging
+logLevel: info
+logDestinations: [stdout]
+
+# RTSP server
+rtspAddress: :8554
+
+# Disable protocols we don't need (keeps it simple)
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+
+# Paths — only one path: /webcam
+# FFmpeg will publish here; pipeline consumers will read from here.
+paths:
+  webcam:
+    # Anyone on the LAN can read
+    readUser:
+    readPass:
+    # Anyone can publish (FFmpeg is local so this is fine)
+    publishUser:
+    publishPass:
