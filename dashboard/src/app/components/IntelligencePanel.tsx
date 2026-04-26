@@ -136,7 +136,7 @@ function EventRow({
               textShadow: '0 0 8px #7a96e844',
             }}
           >
-            CAM-{String(ev.cam).padStart(2, '0')}
+            {ev.camera_id.toUpperCase().replace(/_/g, '-')}
           </span>
           {/* Flag / zoom icons */}
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -197,45 +197,16 @@ function EventRow({
           {getPriorityLabel(ev)}
         </span>
 
-        {/* Score */}
-        <div className="flex items-center gap-2 flex-1">
-          {/* Bar */}
+        {/* Severity bar */}
+        <div className="flex-1 overflow-hidden" style={{ height: 3, background: '#111520', clipPath: 'polygon(3px 0%, 100% 0%, calc(100% - 3px) 100%, 0% 100%)' }}>
           <div
-            className="flex-1 overflow-hidden"
-            style={{ height: 3, background: '#111520', clipPath: 'polygon(3px 0%, 100% 0%, calc(100% - 3px) 100%, 0% 100%)' }}
-          >
-            <div
-              className="h-full transition-all"
-              style={{
-                width: `${barPct}%`,
-                background: `linear-gradient(90deg, ${col}88, ${col})`,
-                boxShadow: `0 0 6px ${col}`,
-              }}
-            />
-          </div>
-          {/* Number */}
-          <span
+            className="h-full transition-all"
             style={{
-              fontFamily: "'DM Mono', monospace",
-              fontSize: 13,
-              color: col,
-              letterSpacing: '0.02em',
-              minWidth: 28,
-              textAlign: 'right',
-              textShadow: `0 0 10px ${col}66`,
+              width: `${barPct}%`,
+              background: `linear-gradient(90deg, ${col}88, ${col})`,
+              boxShadow: `0 0 6px ${col}`,
             }}
-          >
-            {score.toFixed(1)}
-          </span>
-          <span
-            style={{
-              fontFamily: "'DM Mono', monospace",
-              fontSize: 9,
-              color: '#3e5272',
-            }}
-          >
-            /10
-          </span>
+          />
         </div>
       </div>
     </div>
@@ -251,7 +222,7 @@ export function IntelligencePanel({
 }: {
   flaggedEventIds: number[];
   onToggleFlag: (id: number) => void;
-  onZoomCamera: (camId: number) => void;
+  onZoomCamera: (cameraId: string) => void;
   onNewEvent: (camId: number) => void;
 }) {
   const [query, setQuery]             = useState('');
@@ -297,7 +268,7 @@ export function IntelligencePanel({
     setQuery('');
     
     try {
-      const res = await fetch(`http://localhost:5001/api/search?q=${encodeURIComponent(q)}`);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
       if (!res.ok) throw new Error('API error');
       const data = await res.json();
       
@@ -467,7 +438,7 @@ export function IntelligencePanel({
                 flagged={flaggedEventIds.includes(ev.id)}
                 now={now}
                 onToggleFlag={() => onToggleFlag(ev.id)}
-                onZoom={() => onZoomCamera(ev.cam)}
+                onZoom={() => onZoomCamera(ev.camera_id)}
               />
             ))
           )}

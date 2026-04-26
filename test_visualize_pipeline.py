@@ -350,6 +350,7 @@ def global_vlm_batcher(store: EventStore):
                 if cam in _vlm_inflight:
                     continue
                 _vlm_inflight.add(cam)
+            print(f"[batcher] submitting VLM job for {cam}")
             _vlm_executor.submit(_process_single_camera, item, store)
 
 
@@ -361,6 +362,7 @@ def _process_single_camera(item: dict, store: EventStore):
     frames = item["frames"]
 
     try:
+        print(f"[vlm-worker] starting inference for {cam} ({len(frames)} frames)")
         store.add_event(cam, ts, dets, description=None)
 
         recent_events = store.get_recent(cam, seconds=60)
@@ -373,6 +375,7 @@ def _process_single_camera(item: dict, store: EventStore):
             print(f"[vlm] {cam} error: {exc}")
             return
 
+        print(f"[vlm] {cam}: {desc}")
         store.set_description(cam, ts, desc)
         with _desc_lock:
             _description_cache[cam] = f"[{cam}] {desc}"
@@ -387,6 +390,10 @@ def _process_single_camera(item: dict, store: EventStore):
                 except queue.Full:
                     dead.add(q)
             _sse_clients.difference_update(dead)
+    except Exception as exc:
+        import traceback
+        print(f"[vlm-worker] unexpected error for {cam}: {type(exc).__name__}: {exc}")
+        traceback.print_exc()
     finally:
         with _vlm_inflight_lock:
             _vlm_inflight.discard(cam)
@@ -430,6 +437,10 @@ class StreamingHandler(BaseHTTPRequestHandler):
             self._serve_description()
         elif path == "/api/cameras":
             self._serve_cameras()
+        elif path == "/api/events/all":
+            self._serve_all_events()
+        elif path == "/api/vlm/log":
+            self._serve_vlm_log()
         elif path == "/api/events":
             self._serve_events()
         elif path == "/api/stream":
@@ -517,6 +528,37 @@ class StreamingHandler(BaseHTTPRequestHandler):
                     "detections": ev["detections"],
                     "description": ev["description"],
                 })
+        self._json_response(200, result)
+
+    def _serve_all_events(self):
+        events = _api_store.get_all_recent(seconds=300) if _api_store else []
+        result = [
+            {
+                "camera_id":   ev["camera_id"],
+                "timestamp":   ev["timestamp"],
+                "detections":  ev["detections"],
+                "description": ev.get("description") or "",
+            }
+            for ev in reversed(events)  # newest first
+        ]
+        self._json_response(200, result)
+
+    def _serve_vlm_log(self):
+        events = _api_store.get_all_recent(seconds=300) if _api_store else []
+        result = []
+        for ev in reversed(events):  # newest first
+            raw = ev.get("description") or ""
+            if not raw:
+                continue
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                parsed = {"raw": raw}
+            result.append({
+                "camera_id": ev["camera_id"],
+                "timestamp": ev["timestamp"],
+                "vlm":       parsed,
+            })
         self._json_response(200, result)
 
     def _serve_sse(self):

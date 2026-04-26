@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Search, SlidersHorizontal, Minimize2 } from 'lucide-react';
 import { cameras } from './cameraData';
 import { CameraFeed } from './CameraFeed';
@@ -26,6 +26,15 @@ function PipelineCamTile({
 }) {
   const scoreCol = '#34d399'; // green — live means healthy
   const clipNormal = 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))';
+  const [feedSrc, setFeedSrc] = useState(`/video_feed/${cameraId}?raw=1`);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleError = useCallback(() => {
+    if (retryTimer.current) return;
+    retryTimer.current = setTimeout(() => {
+      retryTimer.current = null;
+      setFeedSrc(`/video_feed/${cameraId}?raw=1&t=${Date.now()}`);
+    }, 1500);
+  }, [cameraId]);
 
   return (
     <div
@@ -48,10 +57,11 @@ function PipelineCamTile({
     >
       {/* Real MJPEG stream */}
       <img
-        src={`/video_feed/${cameraId}?raw=1`}
+        src={feedSrc}
         className="block w-full aspect-video object-cover"
         alt={cameraId}
         style={{ imageRendering: 'auto', background: '#07090e' }}
+        onError={handleError}
       />
 
       {/* Top header overlay */}
@@ -88,16 +98,19 @@ function PipelineCamTile({
 export function CameraGrid({
   focusedCamId,
   setFocusedCamId,
+  focusedLiveCam,
+  setFocusedLiveCam,
   flashingCamIds,
 }: {
   focusedCamId: number | null;
   setFocusedCamId: (id: number | null) => void;
+  focusedLiveCam: string | null;
+  setFocusedLiveCam: (id: string | null) => void;
   flashingCamIds: number[];
 }) {
   const [search, setSearch] = useState('');
   const [floor, setFloor] = useState('All');
   const [selectedCam, setSelectedCam] = useState<number | null>(null);
-  const [focusedLiveCam, setFocusedLiveCam] = useState<string | null>(null);
   const { cameras: liveCamIds } = usePipeline();
 
   const filtered = cameras.filter((c) => {
@@ -224,6 +237,10 @@ export function CameraGrid({
               className="block w-full h-full object-cover"
               alt={focusedLiveCam}
               style={{ background: '#07090e' }}
+              onError={(e) => {
+                const img = e.currentTarget;
+                setTimeout(() => { img.src = `/video_feed/${focusedLiveCam}?raw=0&t=${Date.now()}`; }, 1500);
+              }}
             />
           </div>
         </div>

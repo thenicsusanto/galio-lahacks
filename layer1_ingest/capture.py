@@ -33,15 +33,18 @@ class CameraCapture:
                 # Without this OpenCV/FFMPEG buffers several seconds of video.
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-            last_sample = 0.0
+            native_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            native_interval = 1.0 / native_fps
+            # Sample every Nth frame so YOLO only runs at target_fps
+            frame_skip = max(1, round(native_fps / self.target_fps))
+
+            last_frame_time = 0.0
+            file_frame_count = 0
 
             while True:
                 if self.source_type == "rtsp":
-                    # For live streams: skip frames that we don't need to sample
-                    # using grab() (advances the buffer without a full decode) so
-                    # we always consume the stream in real time without CPU waste.
                     now = time.monotonic()
-                    if now - last_sample < self._frame_interval:
+                    if now - last_frame_time < self._frame_interval:
                         if not cap.grab():
                             print(f"[{self.camera_id}] Stream ended, retrying in 5s")
                             break
@@ -50,23 +53,29 @@ class CameraCapture:
                     if not ret:
                         print(f"[{self.camera_id}] Stream ended, retrying in 5s")
                         break
-                    last_sample = now
+                    last_frame_time = now
                     yield self.camera_id, time.time(), frame
                 else:
                     ret, frame = cap.read()
                     if not ret:
                         if self.loop:
                             cap.release()
-                            break  # re-open cleanly via outer loop
+                            break
                         else:
                             print(f"[{self.camera_id}] Stream ended, retrying in 5s")
                             break
-                    # Simulate real-time playback for video files
+
+                    # Sleep to maintain native video speed
                     now = time.monotonic()
-                    time_to_wait = last_sample + self._frame_interval - now
-                    if time_to_wait > 0:
-                        time.sleep(time_to_wait)
-                    last_sample = time.monotonic()
+                    wait = last_frame_time + native_interval - now
+                    if wait > 0:
+                        time.sleep(wait)
+                    last_frame_time = time.monotonic()
+
+                    file_frame_count += 1
+                    # Only forward every Nth frame to YOLO
+                    if file_frame_count % frame_skip != 0:
+                        continue
                     yield self.camera_id, time.time(), frame
 
             cap.release()

@@ -10,6 +10,7 @@ export type NavTab = 'dashboard' | 'cameras' | 'settings';
 export default function App() {
   const [activeNav, setActiveNav] = useState<NavTab>('dashboard');
   const [focusedCamId, setFocusedCamId] = useState<number | null>(null);
+  const [focusedLiveCam, setFocusedLiveCam] = useState<string | null>(null);
   const [flaggedEventIds, setFlaggedEventIds] = useState<number[]>([]);
   const [flashingCamIds, setFlashingCamIds] = useState<number[]>([]);
 
@@ -26,8 +27,8 @@ export default function App() {
     );
   }, []);
 
-  const zoomToCamera = useCallback((camId: number) => {
-    setFocusedCamId(camId);
+  const zoomToCamera = useCallback((cameraId: string) => {
+    setFocusedLiveCam(cameraId);
   }, []);
 
   return (
@@ -88,6 +89,8 @@ export default function App() {
           <CameraGrid
             focusedCamId={focusedCamId}
             setFocusedCamId={setFocusedCamId}
+            focusedLiveCam={focusedLiveCam}
+            setFocusedLiveCam={setFocusedLiveCam}
             flashingCamIds={flashingCamIds}
           />
           <IntelligencePanel

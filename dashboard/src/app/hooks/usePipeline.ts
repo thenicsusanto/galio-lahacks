@@ -40,8 +40,8 @@ function parseDescription(raw: string): ParsedDescription {
       : 'Log';
 
     let severity: 'critical' | 'warning' | 'info' = 'info';
-    if (action === 'Immediate' && score >= 0.7) severity = 'critical';
-    else if (score >= 0.6) severity = 'warning';
+    if (action === 'Immediate' || score >= 0.7) severity = 'critical';
+    else if (action === 'Monitor' || score >= 0.5) severity = 'warning';
 
     const type = category === 'None' ? 'MOTION_DETECTED' : category.toUpperCase().replace(/\s+/g, '_');
 
@@ -82,15 +82,20 @@ export function usePipeline() {
 
   const poll = useCallback(async () => {
     try {
-      const res = await fetch('/api/events');
-      if (!res.ok) throw new Error('not ok');
-      const rawEvents: RawEvent[] = await res.json();
+      // Fetch cameras and events in parallel
+      const [camRes, evRes] = await Promise.all([
+        fetch('/api/cameras'),
+        fetch('/api/events'),
+      ]);
+      if (!camRes.ok || !evRes.ok) throw new Error('not ok');
+      const camList: { id: string }[] = await camRes.json();
+      const rawEvents: RawEvent[] = await evRes.json();
 
       setIsLive(true);
-      if (rawEvents.length === 0) return;
+      // Always update camera list from /api/cameras (populated before any VLM events)
+      setCameras(camList.map(c => c.id));
 
-      // Collect camera ids
-      setCameras(rawEvents.map(e => e.camera_id));
+      if (rawEvents.length === 0) return;
 
       // Only add events we haven't seen before (based on timestamp per camera)
       // Skip Log-level events (VLM said nothing suspicious) to avoid noise in the panel
@@ -100,7 +105,8 @@ export function usePipeline() {
         if (prev !== raw.timestamp) {
           seenTimestamps.current.set(raw.camera_id, raw.timestamp);
           const alert = rawToAlertEvent(raw);
-          if (alert.severity === 'critical' || alert.severity === 'warning') {
+          const isRealThreat = alert.type !== 'MOTION_DETECTED' && alert.type !== 'NONE';
+          if (isRealThreat && (alert.severity === 'critical' || alert.severity === 'warning')) {
             newAlerts.push(alert);
           }
         }

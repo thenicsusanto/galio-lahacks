@@ -41,7 +41,7 @@ def query_vlm(frames: list[np.ndarray], prompt: dict) -> str:
     if STUB_MODE:
         return "[stub] Person detected near entrance, behavior appears normal."
 
-    frames = frames[:6]
+    frames = frames[:4]
 
     image_blocks = [
         {
