@@ -101,12 +101,16 @@ export function CameraGrid({
   focusedLiveCam,
   setFocusedLiveCam,
   flashingCamIds,
+  showBboxes,
+  showTimestamps,
 }: {
   focusedCamId: number | null;
   setFocusedCamId: (id: number | null) => void;
   focusedLiveCam: string | null;
   setFocusedLiveCam: (id: string | null) => void;
   flashingCamIds: number[];
+  showBboxes: boolean;
+  showTimestamps: boolean;
 }) {
   const [search, setSearch] = useState('');
   const [floor, setFloor] = useState('All');
@@ -118,6 +122,10 @@ export function CameraGrid({
     const matchSearch = search === '' || c.name.toLowerCase().includes(search.toLowerCase());
     return matchFloor && matchSearch;
   });
+
+  const filteredLiveCams = liveCamIds.filter(id =>
+    search === '' || id.toLowerCase().includes(search.toLowerCase())
+  );
 
   const focusedCamera = focusedCamId !== null ? cameras.find(c => c.id === focusedCamId) : null;
   const otherCameras = focusedCamId !== null ? cameras.filter(c => c.id !== focusedCamId) : [];
@@ -172,6 +180,8 @@ export function CameraGrid({
               onSelect={() => {}}
               flashing={flashingCamIds.includes(focusedCamera.id)}
               size="focused"
+              showBboxes={showBboxes}
+              showTimestamp={showTimestamps}
             />
           </div>
         </div>
@@ -195,6 +205,8 @@ export function CameraGrid({
                 onDoubleClick={() => setFocusedCamId(cam.id)}
                 flashing={flashingCamIds.includes(cam.id)}
                 size="thumb"
+                showBboxes={showBboxes}
+                showTimestamp={showTimestamps}
               />
             </div>
           ))}
@@ -327,16 +339,16 @@ export function CameraGrid({
 
       {/* Grid */}
       <div className="flex-1 overflow-y-auto p-3">
-        {filtered.length === 0 && liveCamIds.length === 0 ? (
+        {filteredLiveCams.length === 0 && filtered.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: '#3e5272' }}>
               No cameras match filter
             </span>
           </div>
         ) : (
-          <div className="grid gap-2.5" style={{ gridTemplateColumns: (() => { const n = liveCamIds.length > 0 ? liveCamIds.length : filtered.length; return `repeat(${n <= 4 ? 2 : 3}, 1fr)`; })() }}>
+          <div className="grid gap-2.5" style={{ gridTemplateColumns: (() => { const n = liveCamIds.length > 0 ? filteredLiveCams.length : filtered.length; return `repeat(${n <= 4 ? 2 : 3}, 1fr)`; })() }}>
             {/* Real pipeline cameras first */}
-            {liveCamIds.map((camId) => (
+            {filteredLiveCams.map((camId) => (
               <PipelineCamTile
                 key={camId}
                 cameraId={camId}
@@ -355,6 +367,8 @@ export function CameraGrid({
                 onDoubleClick={() => setFocusedCamId(cam.id)}
                 flashing={flashingCamIds.includes(cam.id)}
                 size="normal"
+                showBboxes={showBboxes}
+                showTimestamp={showTimestamps}
               />
             ))}
           </div>

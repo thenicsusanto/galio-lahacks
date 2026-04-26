@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Bot, Send, Bookmark, BookmarkCheck, Maximize2 } from 'lucide-react';
-import { AlertEvent } from './cameraData';
+import { Bot, Send, Bookmark, BookmarkCheck } from 'lucide-react';
+import { AlertEvent, INITIAL_EVENTS } from './cameraData';
 import { usePipeline } from '../hooks/usePipeline';
 
 // ─── Query responses ───────────────────────────────────────────────────────
@@ -57,23 +57,6 @@ function fmtRelative(timestamp: number, now: number): string {
 
 type LogTab = 'alerts' | 'flagged';
 
-// ─── Single-vs-double click helper ────────────────────────────────────────
-function useClickHandler(onSingle: () => void, onDouble: () => void, delay = 220) {
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  return () => {
-    if (timer.current) {
-      clearTimeout(timer.current);
-      timer.current = null;
-      onDouble();
-    } else {
-      timer.current = setTimeout(() => {
-        timer.current = null;
-        onSingle();
-      }, delay);
-    }
-  };
-}
-
 // ─── Event row ────────────────────────────────────────────────────────────
 function EventRow({
   ev,
@@ -90,14 +73,13 @@ function EventRow({
 }) {
   const col   = SEV_COLOR[ev.severity];
   const score = getScore(ev);
-  const handleClick = useClickHandler(onToggleFlag, onZoom);
 
   // Score bar fill %
   const barPct = (score / 10) * 100;
 
   return (
     <div
-      onClick={handleClick}
+      onClick={onZoom}
       className="flex flex-col gap-2 px-4 py-3 cursor-pointer transition-colors group relative"
       style={{
         borderBottom: '1px solid #0e1018',
@@ -109,9 +91,9 @@ function EventRow({
           : 'transparent',
         boxShadow: flagged ? `inset 3px 0 12px ${col}22` : undefined,
       }}
-      title="Click to flag · Double-click to focus camera"
+      title="Click to focus camera"
     >
-      {/* Row 1: Time + Camera */}
+      {/* Row 1: Time + Camera + Flag button */}
       <div className="flex items-center justify-between">
         <span
           style={{
@@ -136,16 +118,19 @@ function EventRow({
               textShadow: '0 0 8px #7a96e844',
             }}
           >
-            {ev.camera_id.toUpperCase().replace(/_/g, '-')}
+            {(ev.camera_id || `cam_${ev.cam}`).toUpperCase().replace(/_/g, '-')}
           </span>
-          {/* Flag / zoom icons */}
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Maximize2 size={11} color="#48607a" />
+          {/* Flag button — always visible, stops row click propagating */}
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleFlag(); }}
+            title={flagged ? 'Unflag' : 'Flag'}
+            style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+          >
             {flagged
-              ? <BookmarkCheck size={13} color="#e8a840" />
-              : <Bookmark size={13} color="#48607a" />
+              ? <BookmarkCheck size={14} color="#e8a840" />
+              : <Bookmark size={14} color="#48607a" />
             }
-          </div>
+          </button>
         </div>
       </div>
 
@@ -240,7 +225,7 @@ export function IntelligencePanel({
   const { events: pipelineEvents } = usePipeline();
 
   // Merge real pipeline events on top of initial seed events
-  const [localEvents, setLocalEvents] = useState<AlertEvent[]>([]);
+  const [localEvents, setLocalEvents] = useState<AlertEvent[]>(INITIAL_EVENTS);
 
   // When pipeline events arrive, prepend them to localEvents
   useEffect(() => {
@@ -276,7 +261,7 @@ export function IntelligencePanel({
         const top = data[0];
         const date = new Date(top.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
         
-        let text = `→ ${top.camera_id.toUpperCase()} @ ${date}:\n${top.description}`;
+        let text = `→ ${(top.camera_id || 'UNKNOWN').toUpperCase()} @ ${date}:\n${top.description}`;
         
         if (data.length > 1) {
              text += `\n\n(+ ${data.length - 1} other semantic matches found)`;
@@ -433,12 +418,12 @@ export function IntelligencePanel({
           ) : (
             displayedEvents.map(ev => (
               <EventRow
-                key={`${ev.camera_id}-${ev.timestamp}`}
+                key={`${ev.camera_id || 'static'}-${ev.id}-${ev.timestamp}`}
                 ev={ev}
                 flagged={flaggedEventIds.includes(ev.id)}
                 now={now}
                 onToggleFlag={() => onToggleFlag(ev.id)}
-                onZoom={() => onZoomCamera(ev.camera_id)}
+                onZoom={() => onZoomCamera(ev.camera_id || `cam_${ev.cam}`)}
               />
             ))
           )}

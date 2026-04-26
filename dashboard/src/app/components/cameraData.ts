@@ -142,14 +142,54 @@ export interface AlertEvent {
 }
 
 export const INITIAL_EVENTS: AlertEvent[] = [
-  { id: 10, time: '14:23:22', cam: 3, type: 'LOITERING_ALERT', details: 'duration=4m28s zone=EXIT threshold=120s', severity: 'critical' },
-  { id: 9, time: '14:23:19', cam: 5, type: 'BAG_UNATTENDED', details: 'duration=2m01s threshold_exceeded=true', severity: 'critical' },
-  { id: 8, time: '14:23:17', cam: 4, type: 'VEHICLE_DETECTED', details: 'bbox=[352,151,243,115] conf=0.94', severity: 'info' },
-  { id: 7, time: '14:23:15', cam: 4, type: 'VEHICLE_DETECTED', details: 'bbox=[51,137,269,137] conf=0.99', severity: 'info' },
-  { id: 6, time: '14:23:13', cam: 2, type: 'PERSON_DETECTED', details: 'bbox=[307,135,58,115] conf=0.93', severity: 'info' },
-  { id: 5, time: '14:23:11', cam: 1, type: 'PERSON_DETECTED', details: 'bbox=[224,132,77,136] conf=0.97', severity: 'info' },
-  { id: 4, time: '14:23:09', cam: 7, type: 'PERSON_DETECTED', details: 'bbox=[256,72,168,237] conf=0.88', severity: 'info' },
-  { id: 3, time: '14:23:07', cam: 3, type: 'PERSON_DETECTED', details: 'bbox=[212,102,154,207] conf=0.96', severity: 'info' },
-  { id: 2, time: '14:23:05', cam: 5, type: 'BAG_UNATTENDED', details: 'bbox=[334,223,115,79] conf=0.91', severity: 'warning' },
-  { id: 1, time: '14:23:01', cam: 3, type: 'LOITERING_ALERT', details: 'duration=4m12s zone=EXIT', severity: 'critical' },
+  { 
+    id: 10, time: '14:23:22', timestamp: Date.now() / 1000 - 40, cam: 3, camera_id: 'cam_03', 
+    type: 'LOITERING_ALERT', details: 'duration=4m28s zone=EXIT threshold=120s', severity: 'critical', 
+    score: 0.92, action_required: 'Immediate', detections: [] 
+  },
+  { 
+    id: 9, time: '14:23:19', timestamp: Date.now() / 1000 - 80, cam: 5, camera_id: 'cam_05', 
+    type: 'BAG_UNATTENDED', details: 'duration=2m01s threshold_exceeded=true', severity: 'critical', 
+    score: 0.88, action_required: 'Immediate', detections: [] 
+  },
+  { 
+    id: 8, time: '14:23:17', timestamp: Date.now() / 1000 - 120, cam: 4, camera_id: 'cam_04', 
+    type: 'VEHICLE_DETECTED', details: 'bbox=[352,151,243,115] conf=0.94', severity: 'info', 
+    score: 0.35, action_required: 'Log', detections: [] 
+  },
+  { 
+    id: 7, time: '14:23:15', timestamp: Date.now() / 1000 - 150, cam: 4, camera_id: 'cam_04', 
+    type: 'VEHICLE_DETECTED', details: 'bbox=[51,137,269,137] conf=0.99', severity: 'info', 
+    score: 0.42, action_required: 'Log', detections: [] 
+  },
+  { 
+    id: 6, time: '14:23:13', timestamp: Date.now() / 1000 - 180, cam: 2, camera_id: 'cam_02', 
+    type: 'PERSON_DETECTED', details: 'bbox=[307,135,58,115] conf=0.93', severity: 'info', 
+    score: 0.28, action_required: 'Log', detections: [] 
+  },
+  { 
+    id: 5, time: '14:23:11', timestamp: Date.now() / 1000 - 210, cam: 1, camera_id: 'cam_01', 
+    type: 'PERSON_DETECTED', details: 'bbox=[224,132,77,136] conf=0.97', severity: 'info', 
+    score: 0.31, action_required: 'Log', detections: [] 
+  },
+  { 
+    id: 4, time: '14:23:09', timestamp: Date.now() / 1000 - 240, cam: 7, camera_id: 'cam_07', 
+    type: 'PERSON_DETECTED', details: 'bbox=[256,72,168,237] conf=0.88', severity: 'info', 
+    score: 0.25, action_required: 'Log', detections: [] 
+  },
+  { 
+    id: 3, time: '14:23:07', timestamp: Date.now() / 1000 - 270, cam: 3, camera_id: 'cam_03', 
+    type: 'PERSON_DETECTED', details: 'bbox=[212,102,154,207] conf=0.96', severity: 'info', 
+    score: 0.33, action_required: 'Log', detections: [] 
+  },
+  { 
+    id: 2, time: '14:23:05', timestamp: Date.now() / 1000 - 300, cam: 5, camera_id: 'cam_05', 
+    type: 'BAG_UNATTENDED', details: 'bbox=[334,223,115,79] conf=0.91', severity: 'warning', 
+    score: 0.65, action_required: 'Monitor', detections: [] 
+  },
+  { 
+    id: 1, time: '14:23:01', timestamp: Date.now() / 1000 - 360, cam: 3, camera_id: 'cam_03', 
+    type: 'LOITERING_ALERT', details: 'duration=4m12s zone=EXIT', severity: 'critical', 
+    score: 0.95, action_required: 'Immediate', detections: [] 
+  },
 ];

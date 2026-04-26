@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { CameraGrid } from './components/CameraGrid';
 import { IntelligencePanel } from './components/IntelligencePanel';
@@ -13,6 +13,16 @@ export default function App() {
   const [focusedLiveCam, setFocusedLiveCam] = useState<string | null>(null);
   const [flaggedEventIds, setFlaggedEventIds] = useState<number[]>([]);
   const [flashingCamIds, setFlashingCamIds] = useState<number[]>([]);
+  const [showBboxes, setShowBboxes] = useState(false);
+  const [showTimestamps, setShowTimestamps] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bboxes: showBboxes }),
+    }).catch(() => {});
+  }, [showBboxes]);
 
   const handleNewEvent = useCallback((camId: number) => {
     setFlashingCamIds(prev => Array.from(new Set([...prev, camId])));
@@ -92,6 +102,8 @@ export default function App() {
             focusedLiveCam={focusedLiveCam}
             setFocusedLiveCam={setFocusedLiveCam}
             flashingCamIds={flashingCamIds}
+            showBboxes={showBboxes}
+            showTimestamps={showTimestamps}
           />
           <IntelligencePanel
             flaggedEventIds={flaggedEventIds}
@@ -102,7 +114,14 @@ export default function App() {
         </>
       )}
       {activeNav === 'cameras' && <ManageCameras />}
-      {activeNav === 'settings' && <SettingsView />}
+      {activeNav === 'settings' && (
+        <SettingsView 
+          showBboxes={showBboxes} 
+          onToggleBboxes={setShowBboxes} 
+          showTimestamps={showTimestamps}
+          onToggleTimestamps={setShowTimestamps}
+        />
+      )}
     </div>
   );
 }

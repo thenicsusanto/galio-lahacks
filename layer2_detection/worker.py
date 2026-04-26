@@ -48,6 +48,7 @@ def detection_worker(in_queue: mp.Queue, out_queue: mp.Queue):
         out_queue.put({
             "camera_id": item["camera_id"],
             "timestamp": item["timestamp"],
-            "frame": anonymized_frame,
+            "frame": anonymized_frame,  # for pipeline
+            "frame_unblurred": frame,   # for streaming
             "detections": detections,
         })

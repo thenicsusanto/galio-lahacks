@@ -80,6 +80,10 @@ _managed_cameras: Dict[str, dict] = {}
 _ingest_processes: Dict[str, mp.Process] = {}
 _cameras_lock = threading.Lock()
 
+# Display settings (toggled at runtime via PUT /api/settings)
+_show_bboxes: bool = False
+_settings_lock = threading.Lock()
+
 # Per-camera detection queues fed by a single fan-out thread
 # camera_id -> queue.Queue[dict | None]
 _per_cam_detect_q: Dict[str, queue.Queue] = {}
@@ -125,8 +129,8 @@ def draw_detections(frame: np.ndarray, detections: list) -> np.ndarray:
         font_scale, thickness = 0.8, 2
         (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
         cv2.rectangle(frame, (x1, y1 - th - 6), (x1 + tw + 4, y1), color, -1)
-        cv2.putText(frame, text, (x1 + 2, y1 - 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), thickness)
+        # cv2.putText(frame, text, (x1 + 2, y1 - 4),
+        #             cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), thickness)
     return frame
 
 # ---------------------------------------------------------------------------
@@ -164,34 +168,27 @@ def detection_fanout_worker(raw_q: mp.Queue):
         with _lag_lock:
             _lag_samples.append(lag)
 
-        # Encode JPEG only when at least one MJPEG client is connected.
-        # With zero viewers this block is pure waste — skip it entirely.
-        with _mjpeg_count_lock:
-            has_viewers = _mjpeg_client_count > 0
-        if has_viewers:
-            draw_frame = item["frame"].copy()
-            draw_detections(draw_frame, item["detections"])
-            ret, jpeg_buf = cv2.imencode(
-                ".jpg", draw_frame,
-                [cv2.IMWRITE_JPEG_QUALITY, 80]
-            )
-            if ret:
-                with _jpeg_cache_lock:
-                    _jpeg_cache[cam] = jpeg_buf.tobytes()
+        # Use unblurred frame for streaming, blurred for pipeline
+        orig_frame = item.get("frame_unblurred")
+        if orig_frame is None:
+            orig_frame = item["frame"]
 
-        # Route to per-camera detect queue for the per-camera VLM feeder
-        try:
-            _per_cam_detect_q[cam].put_nowait(item)
-        except queue.Full:
-            # Drop oldest, insert newest — keeps latency bounded
-            try:
-                _per_cam_detect_q[cam].get_nowait()
-            except queue.Empty:
-                pass
-            try:
-                _per_cam_detect_q[cam].put_nowait(item)
-            except queue.Full:
-                pass
+        # For pipeline, use the blurred frame (item["frame"])
+        blurred_frame = item["frame"]
+
+        # Always encode and cache the unblurred JPEG for streaming
+        draw_frame = orig_frame.copy()
+        with _settings_lock:
+            bboxes_on = _show_bboxes
+        if bboxes_on:
+            draw_detections(draw_frame, item["detections"])
+        ret, jpeg_buf = cv2.imencode(
+            ".jpg", draw_frame,
+            [cv2.IMWRITE_JPEG_QUALITY, 80]
+        )
+        if ret:
+            with _jpeg_cache_lock:
+                _jpeg_cache[cam] = jpeg_buf.tobytes()
 
 
 # ---------------------------------------------------------------------------
@@ -410,7 +407,7 @@ class StreamingHandler(BaseHTTPRequestHandler):
     # --- CORS helpers -------------------------------------------------------
     def _send_cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _json_response(self, code: int, data):
@@ -455,6 +452,12 @@ class StreamingHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path.split("?")[0] == "/api/cameras":
             self._add_camera()
+        else:
+            self.send_error(404)
+
+    def do_PUT(self):
+        if self.path.split("?")[0] == "/api/settings":
+            self._update_settings()
         else:
             self.send_error(404)
 
@@ -650,6 +653,21 @@ class StreamingHandler(BaseHTTPRequestHandler):
         finally:
             with _mjpeg_count_lock:
                 _mjpeg_client_count -= 1
+
+    def _update_settings(self):
+        global _show_bboxes
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        try:
+            data = json.loads(body)
+        except Exception:
+            self._json_response(400, {"error": "invalid JSON"})
+            return
+        with _settings_lock:
+            if "bboxes" in data:
+                _show_bboxes = bool(data["bboxes"])
+        with _settings_lock:
+            self._json_response(200, {"bboxes": _show_bboxes})
 
     def _add_camera(self):
         length = int(self.headers.get("Content-Length", 0))

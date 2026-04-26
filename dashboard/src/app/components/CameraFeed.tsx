@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CameraData, DetectionData, PersonData } from './cameraData';
-import { HudCorners } from './HudCorners';
+import { CameraData, DetectionData } from './cameraData';
 
 const CANVAS_W = 640;
 const CANVAS_H = 360;
@@ -286,7 +285,7 @@ function drawVignette(ctx: CanvasRenderingContext2D, w: number, h: number) {
   ctx.fillRect(0, 0, w, h);
 }
 
-function drawScene(ctx: CanvasRenderingContext2D, camera: CameraData, tick: number) {
+function drawScene(ctx: CanvasRenderingContext2D, camera: CameraData, tick: number, showBboxes: boolean) {
   const w = ctx.canvas.width, h = ctx.canvas.height;
   drawBackground(ctx, w, h, camera.scene);
   switch (camera.scene) {
@@ -301,8 +300,10 @@ function drawScene(ctx: CanvasRenderingContext2D, camera: CameraData, tick: numb
     const py = p.y * h;
     drawBlurredPerson(ctx, px, py, p.w * w, p.h * h, !!p.loitering, tick);
   }
-  for (const det of camera.detections) {
-    drawDetection(ctx, det, w, h);
+  if (showBboxes) {
+    for (const det of camera.detections) {
+      drawDetection(ctx, det, w, h);
+    }
   }
   drawScanlines(ctx, w, h);
   drawVignette(ctx, w, h);
@@ -321,6 +322,8 @@ export function CameraFeed({
   onDoubleClick,
   flashing = false,
   size = 'normal',
+  showBboxes = false,
+  showTimestamp = true,
 }: {
   camera: CameraData;
   selected: boolean;
@@ -328,6 +331,8 @@ export function CameraFeed({
   onDoubleClick?: () => void;
   flashing?: boolean;
   size?: 'normal' | 'focused' | 'thumb';
+  showBboxes?: boolean;
+  showTimestamp?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
@@ -351,7 +356,7 @@ export function CameraFeed({
     if (!ctx) return;
     function loop() {
       tickRef.current++;
-      drawScene(ctx!, camera, tickRef.current);
+      drawScene(ctx!, camera, tickRef.current, showBboxes);
       frameCount.current++;
       const now = Date.now();
       if (now - lastFpsUpdate.current >= 1000) {
@@ -363,13 +368,12 @@ export function CameraFeed({
     }
     loop();
     return () => cancelAnimationFrame(animRef.current);
-  }, [camera]);
+  }, [camera, showBboxes]);
 
   const ts = time.toLocaleTimeString('en-GB', { hour12: false });
-  const scoreCol = SCORE_COLOR[camera.status];
+  const scoreCol = SCORE_COLOR[camera.status] ?? '#34d399';
 
   const isThumb = size === 'thumb';
-
   const clipNormal = 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))';
 
   return (
@@ -383,8 +387,8 @@ export function CameraFeed({
         border: selected
           ? `1.5px solid ${scoreCol}`
           : flashing
-          ? '1.5px solid #e8607a88'
-          : '1.5px solid #c9a84c22',
+            ? '1.5px solid #e8607a88'
+            : '1.5px solid #c9a84c22',
         boxShadow: selected
           ? `0 0 0 1px ${scoreCol}44, 0 0 20px ${scoreCol}22`
           : '0 0 0 1px #c9a84c11',
@@ -394,30 +398,8 @@ export function CameraFeed({
       <canvas
         ref={canvasRef}
         className="block w-full aspect-video"
-        style={{ imageRendering: 'auto' }}
+        style={{ imageRendering: 'auto' }} 
       />
-
-      {/* HUD Corner brackets */}
-      {!isThumb && (
-        <HudCorners
-          color={selected ? scoreCol : flashing ? '#e8607a' : '#c9a84c'}
-          size={14}
-          thickness={2}
-          opacity={selected || flashing ? 0.9 : 0.5}
-        />
-      )}
-
-      {/* Scanning line sweep */}
-      {!isThumb && (
-        <div
-          className="hud-scanline absolute left-0 right-0 pointer-events-none"
-          style={{
-            height: '25%',
-            background: 'linear-gradient(to bottom, transparent, rgba(201,168,76,0.04) 40%, rgba(201,168,76,0.08) 50%, rgba(201,168,76,0.04) 60%, transparent)',
-            top: 0,
-          }}
-        />
-      )}
 
       {/* Top header overlay */}
       {!isThumb && (
@@ -431,7 +413,6 @@ export function CameraFeed({
               <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#7a96e8', marginRight: 8 }}>
                 {fps} FPS
               </span>
-              
               {/* Red Diamond Indicator */}
               <span
                 style={{
@@ -441,37 +422,39 @@ export function CameraFeed({
                   clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
                   background: '#f87171',
                   boxShadow: '0 0 6px #f87171',
-                }}
+                }} 
               />
             </div>
-
-            <span 
-              className="text-[11px] text-white/90 truncate max-w-[160px]" 
+            <span
+              className="text-[11px] text-white/90 truncate max-w-[160px]"
               style={{ fontFamily: "'Inter', sans-serif", letterSpacing: '0.01em' }}
             >
               {camera.name}
             </span>
           </div>
-
-          <div className="flex items-center gap-2">
-            <span 
-              className="text-[10.5px] tabular-nums" 
-              style={{ 
-                fontFamily: "'DM Mono', monospace", 
-                color: '#c9a84caa', 
-                textShadow: '0 0 8px #c9a84c66' 
-              }}
-            >
-              {ts}
-            </span>
-          </div>
+          {showTimestamp && (
+            <div className="flex items-center gap-2">
+              <span
+                className="text-[10.5px] tabular-nums"
+                style={{
+                  fontFamily: "'DM Mono', monospace",
+                  color: '#c9a84caa',
+                  textShadow: '0 0 8px #c9a84c66'
+                }}
+              >
+                {ts}
+              </span>
+            </div>
+          )}
         </div>
       )}
 
       {/* Thumb label */}
       {isThumb && (
         <div className="absolute bottom-0 left-0 right-0 px-1.5 py-1" style={{ background: 'rgba(0,0,0,0.7)' }}>
-          <span className="text-[9.5px] text-white/70 truncate block" style={{ fontFamily: "'Inter', sans-serif" }}>{camera.name}</span>
+          <span className="text-[9.5px] text-white/70 truncate block" style={{ fontFamily: "'Inter', sans-serif" }}>
+            {camera.name}
+          </span>
         </div>
       )}
 

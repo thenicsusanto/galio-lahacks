@@ -60,12 +60,22 @@ function Row({ label, description, children }: { label: string; description?: st
   );
 }
 
-export function SettingsView() {
+export function SettingsView({ 
+  showBboxes, 
+  onToggleBboxes,
+  showTimestamps,
+  onToggleTimestamps,
+}: { 
+  showBboxes: boolean; 
+  onToggleBboxes: (v: boolean) => void;
+  showTimestamps: boolean;
+  onToggleTimestamps: (v: boolean) => void;
+}) {
   const [loiterThreshold, setLoiterThreshold] = useState(120);
   const [bagThreshold, setBagThreshold] = useState(90);
   const [motionSensitivity, setMotionSensitivity] = useState(70);
   const [alerts, setAlerts] = useState({ sound: true, flash: true, critical: true, autoflag: false });
-  const [display, setDisplay] = useState({ blur: true, bboxes: true, scanlines: true, timestamps: true });
+  const [display, setDisplay] = useState({ blur: true, scanlines: true });
 
   const toggleAlert = (k: keyof typeof alerts) => setAlerts(p => ({ ...p, [k]: !p[k] }));
   const toggleDisplay = (k: keyof typeof display) => setDisplay(p => ({ ...p, [k]: !p[k] }));
@@ -91,11 +101,11 @@ export function SettingsView() {
         <div className="flex flex-col gap-4 max-w-2xl">
 
           {/* Detection thresholds */}
-          <Section icon={Sliders} title="Detection Thresholds">
+          {/* <Section icon={Sliders} title="Detection Thresholds">
             <SliderInput label="Loitering alert threshold" value={loiterThreshold} min={30} max={300} unit="s" onChange={setLoiterThreshold} />
             <SliderInput label="Unattended bag threshold" value={bagThreshold} min={15} max={180} unit="s" onChange={setBagThreshold} />
             <SliderInput label="Motion sensitivity" value={motionSensitivity} min={10} max={100} unit="%" onChange={setMotionSensitivity} />
-          </Section>
+          </Section> */}
 
           {/* Alert settings */}
           <Section icon={Bell} title="Alerts">
@@ -108,34 +118,28 @@ export function SettingsView() {
             <Row label="Critical-only mode" description="Suppress info-level events from the log">
               <Toggle value={alerts.critical} onChange={() => toggleAlert('critical')} />
             </Row>
-            <Row label="Auto-flag critical events" description="Automatically flag all Incident-level events">
+            {/* <Row label="Auto-flag critical events" description="Automatically flag all Incident-level events">
               <Toggle value={alerts.autoflag} onChange={() => toggleAlert('autoflag')} />
-            </Row>
+            </Row> */}
           </Section>
 
           {/* Display */}
           <Section icon={Eye} title="Display">
-            <Row label="Privacy blur on persons" description="Apply anonymization blur to all detected persons">
-              <Toggle value={display.blur} onChange={() => toggleDisplay('blur')} />
-            </Row>
             <Row label="Show YOLO bounding boxes" description="Display detection boxes from the detector layer">
-              <Toggle value={display.bboxes} onChange={() => toggleDisplay('bboxes')} />
-            </Row>
-            <Row label="Scanline overlay" description="CRT-style scanlines on camera feeds">
-              <Toggle value={display.scanlines} onChange={() => toggleDisplay('scanlines')} />
+              <Toggle value={showBboxes} onChange={onToggleBboxes} />
             </Row>
             <Row label="Timestamps on feeds" description="Show live clock on each camera thumbnail">
-              <Toggle value={display.timestamps} onChange={() => toggleDisplay('timestamps')} />
+              <Toggle value={showTimestamps} onChange={onToggleTimestamps} />
             </Row>
           </Section>
 
           {/* System */}
           <Section icon={Shield} title="System">
             <Row label="AI model" description="VLM used for scene understanding">
-              <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#7a96e8' }}>VLM-3.5-Turbo</span>
+              <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#7a96e8' }}>Qwen2.5-VL-7B-Instruct</span>
             </Row>
             <Row label="Detection pipeline" description="Object detection model">
-              <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#7a96e8' }}>YOLO-v8</span>
+              <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#7a96e8' }}>YOLO-v26</span>
             </Row>
             <Row label="System version" description="">
               <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#48607a' }}>v2.1.4</span>
