@@ -9,7 +9,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { AlertEvent } from '../components/cameraData';
 
-const POLL_MS = 2000;
+const POLL_MS = 500;
 
 interface RawEvent {
   camera_id: string;
@@ -29,7 +29,8 @@ interface ParsedDescription {
 
 function parseDescription(raw: string): ParsedDescription {
   try {
-    const obj = JSON.parse(raw);
+    const stripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+    const obj = JSON.parse(stripped);
     const category: string = obj.category ?? 'None';
     const score: number = typeof obj.anomaly_score === 'number' ? obj.anomaly_score : 0;
     const rationale: string = obj.rationale ?? raw;
@@ -39,8 +40,8 @@ function parseDescription(raw: string): ParsedDescription {
       : 'Log';
 
     let severity: 'critical' | 'warning' | 'info' = 'info';
-    if (action === 'Immediate' || score >= 0.7) severity = 'critical';
-    else if (action === 'Monitor' || score >= 0.4) severity = 'warning';
+    if (action === 'Immediate' && score >= 0.7) severity = 'critical';
+    else if (score >= 0.6) severity = 'warning';
 
     const type = category === 'None' ? 'MOTION_DETECTED' : category.toUpperCase().replace(/\s+/g, '_');
 
@@ -92,12 +93,16 @@ export function usePipeline() {
       setCameras(rawEvents.map(e => e.camera_id));
 
       // Only add events we haven't seen before (based on timestamp per camera)
+      // Skip Log-level events (VLM said nothing suspicious) to avoid noise in the panel
       const newAlerts: AlertEvent[] = [];
       for (const raw of rawEvents) {
         const prev = seenTimestamps.current.get(raw.camera_id);
         if (prev !== raw.timestamp) {
           seenTimestamps.current.set(raw.camera_id, raw.timestamp);
-          newAlerts.push(rawToAlertEvent(raw));
+          const alert = rawToAlertEvent(raw);
+          if (alert.severity === 'critical' || alert.severity === 'warning') {
+            newAlerts.push(alert);
+          }
         }
       }
 

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Bot, Send, Bookmark, BookmarkCheck, Maximize2, Wifi, WifiOff } from 'lucide-react';
+import { Bot, Send, Bookmark, BookmarkCheck, Maximize2 } from 'lucide-react';
 import { AlertEvent } from './cameraData';
 import { usePipeline } from '../hooks/usePipeline';
 
@@ -55,7 +55,7 @@ function fmtRelative(timestamp: number, now: number): string {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-type LogTab = 'all' | 'warnings' | 'flagged';
+type LogTab = 'alerts' | 'flagged';
 
 // ─── Single-vs-double click helper ────────────────────────────────────────
 function useClickHandler(onSingle: () => void, onDouble: () => void, delay = 220) {
@@ -256,7 +256,7 @@ export function IntelligencePanel({
 }) {
   const [query, setQuery]             = useState('');
   const [queryResult, setQueryResult] = useState<{ text: string; query: string } | null>(null);
-  const [logTab, setLogTab]           = useState<LogTab>('all');
+  const [logTab, setLogTab]           = useState<LogTab>('alerts');
   const [now, setNow]                 = useState(Date.now());
 
   useEffect(() => {
@@ -266,7 +266,7 @@ export function IntelligencePanel({
   const logRef  = useRef<HTMLDivElement>(null);
 
   // Real pipeline data
-  const { events: pipelineEvents, isLive } = usePipeline();
+  const { events: pipelineEvents } = usePipeline();
 
   // Merge real pipeline events on top of initial seed events
   const [localEvents, setLocalEvents] = useState<AlertEvent[]>([]);
@@ -322,9 +322,8 @@ export function IntelligencePanel({
 
   const displayedEvents = (() => {
     switch (logTab) {
-      case 'warnings': return events.filter(e => e.severity === 'critical' || e.severity === 'warning');
-      case 'flagged':  return events.filter(e => flaggedEventIds.includes(e.id));
-      default:         return events;
+      case 'flagged': return events.filter(e => flaggedEventIds.includes(e.id));
+      default:        return events; // 'alerts' — Log-level events already filtered in usePipeline
     }
   })();
 
@@ -404,13 +403,10 @@ export function IntelligencePanel({
           className="flex items-center shrink-0"
           style={{ borderBottom: '1px solid #c9a84c22', background: '#0a0b14' }}
         >
-          {(['all', 'warnings', 'flagged'] as LogTab[]).map(tab => {
+          {(['alerts', 'flagged'] as LogTab[]).map(tab => {
             const isActive = logTab === tab;
-            const count =
-              tab === 'warnings' ? events.filter(e => e.severity === 'critical' || e.severity === 'warning').length
-              : tab === 'flagged' ? flaggedEventIds.length
-              : events.length;
-            const tabAccent = tab === 'warnings' ? '#e8607a' : tab === 'flagged' ? '#e8a840' : '#c9a84c';
+            const count = tab === 'flagged' ? flaggedEventIds.length : events.length;
+            const tabAccent = tab === 'flagged' ? '#e8a840' : '#e8607a';
             return (
               <button
                 key={tab}
@@ -425,14 +421,13 @@ export function IntelligencePanel({
                   clipPath: isActive ? 'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%)' : 'none',
                 }}
               >
-                {/* Active bottom accent */}
                 {isActive && (
                   <div
                     className="absolute bottom-0 left-0 right-0"
                     style={{ height: 2, background: tabAccent, boxShadow: `0 0 8px ${tabAccent}` }}
                   />
                 )}
-                {tab === 'all' ? 'All' : tab === 'warnings' ? 'Warnings' : 'Flagged'}
+                {tab === 'alerts' ? 'Alerts' : 'Flagged'}
                 <span
                   className="px-1.5 py-0"
                   style={{
@@ -450,29 +445,6 @@ export function IntelligencePanel({
             );
           })}
 
-          <div className="ml-auto flex items-center gap-1.5 pr-3">
-            {isLive ? (
-              <>
-                <Wifi size={11} color="#34d399" />
-                <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 8.5, color: '#34d399', letterSpacing: '0.04em' }}>Pipeline Live</span>
-              </>
-            ) : (
-              <>
-                <WifiOff size={11} color="#4a6080" />
-                <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 8.5, color: '#4a6080', letterSpacing: '0.04em' }}>Demo Mode</span>
-              </>
-            )}
-            <span
-              className="animate-pulse ml-1"
-              style={{
-                display: 'inline-block',
-                width: 6, height: 6,
-                clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
-                background: isLive ? '#34d399' : '#f87171',
-                boxShadow: isLive ? '0 0 6px #34d399' : '0 0 6px #f87171',
-              }}
-            />
-          </div>
         </div>
 
         {/* Log list */}
@@ -484,13 +456,13 @@ export function IntelligencePanel({
           {displayedEvents.length === 0 ? (
             <div className="flex items-center justify-center h-20">
               <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: '#3e5272' }}>
-                {logTab === 'flagged' ? 'No flagged events' : 'No events'}
+                {logTab === 'flagged' ? 'No flagged events' : 'No suspicious activity detected'}
               </span>
             </div>
           ) : (
             displayedEvents.map(ev => (
               <EventRow
-                key={ev.id}
+                key={`${ev.camera_id}-${ev.timestamp}`}
                 ev={ev}
                 flagged={flaggedEventIds.includes(ev.id)}
                 now={now}

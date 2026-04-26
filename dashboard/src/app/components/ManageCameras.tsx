@@ -73,6 +73,8 @@ export function ManageCameras() {
   };
 
   const removeCamera = async (id: string) => {
+    // Optimistically remove from UI
+    setCameras(prev => prev.filter(cam => cam.id !== id));
     await fetch(`/api/cameras/${id}`, { method: 'DELETE' });
     fetchCameras();
   };

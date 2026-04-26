@@ -333,6 +333,9 @@ export function CameraFeed({
   const animRef = useRef<number>(0);
   const tickRef = useRef(0);
   const [time, setTime] = useState(() => new Date());
+  const [fps, setFps] = useState(0);
+  const frameCount = useRef(0);
+  const lastFpsUpdate = useRef(Date.now());
 
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000);
@@ -349,6 +352,13 @@ export function CameraFeed({
     function loop() {
       tickRef.current++;
       drawScene(ctx!, camera, tickRef.current);
+      frameCount.current++;
+      const now = Date.now();
+      if (now - lastFpsUpdate.current >= 1000) {
+        setFps(frameCount.current);
+        frameCount.current = 0;
+        lastFpsUpdate.current = now;
+      }
       animRef.current = requestAnimationFrame(loop);
     }
     loop();
@@ -415,23 +425,45 @@ export function CameraFeed({
           className="absolute top-0 left-0 right-0 flex items-center justify-between px-2.5 py-1.5"
           style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.85), transparent)' }}
         >
-          <div className="flex items-center gap-1.5">
-            <span
-              className="animate-pulse"
-              style={{
-                display: 'inline-block',
-                width: 6, height: 6,
-                clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
-                background: '#f87171',
-                boxShadow: '0 0 6px #f87171',
-              }}
-            />
-            <span className="text-[11px] text-white/90 truncate max-w-[160px]" style={{ fontFamily: "'Inter', sans-serif", letterSpacing: '0.01em' }}>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center animate-pulse">
+              {/* FPS indicator */}
+              <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#7a96e8', marginRight: 8 }}>
+                {fps} FPS
+              </span>
+              
+              {/* Red Diamond Indicator */}
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: 6,
+                  height: 6,
+                  clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
+                  background: '#f87171',
+                  boxShadow: '0 0 6px #f87171',
+                }}
+              />
+            </div>
+
+            <span 
+              className="text-[11px] text-white/90 truncate max-w-[160px]" 
+              style={{ fontFamily: "'Inter', sans-serif", letterSpacing: '0.01em' }}
+            >
               {camera.name}
             </span>
           </div>
+
           <div className="flex items-center gap-2">
-            <span className="text-[10.5px] tabular-nums" style={{ fontFamily: "'DM Mono', monospace", color: '#c9a84caa', textShadow: '0 0 8px #c9a84c66' }}>{ts}</span>
+            <span 
+              className="text-[10.5px] tabular-nums" 
+              style={{ 
+                fontFamily: "'DM Mono', monospace", 
+                color: '#c9a84caa', 
+                textShadow: '0 0 8px #c9a84c66' 
+              }}
+            >
+              {ts}
+            </span>
           </div>
         </div>
       )}

@@ -84,8 +84,9 @@ $FfArgs = @(
     "-framerate", "$Fps",
     "-i", "video=$Camera",
     "-vcodec", "libx264",
-    "-preset", "ultrafast",   # minimize encode latency
+    "-preset", "ultrafast",
     "-tune", "zerolatency",
+    "-g", "$Fps",              # keyframe every 1 second — decoder can start immediately
     "-b:v", "${Bitrate}k",
     "-f", "rtsp",
     "-rtsp_transport", "tcp",

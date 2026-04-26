@@ -56,8 +56,8 @@ class CameraCapture:
                     ret, frame = cap.read()
                     if not ret:
                         if self.loop:
-                            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                            continue
+                            cap.release()
+                            break  # re-open cleanly via outer loop
                         else:
                             print(f"[{self.camera_id}] Stream ended, retrying in 5s")
                             break

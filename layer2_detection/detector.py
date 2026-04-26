@@ -27,9 +27,12 @@ class Detector:
         cfg_path = os.path.join(os.path.dirname(__file__), "..", "config.yaml")
         try:
             with open(cfg_path) as f:
-                yolo_weights = yaml.safe_load(f).get("models", {}).get("yolo", "yolo26s.pt")
+                models_cfg = yaml.safe_load(f).get("models", {})
+                yolo_weights = models_cfg.get("yolo", "yolo26s.pt")
+                self.imgsz = models_cfg.get("yolo_imgsz", 416)
         except Exception:
             yolo_weights = "yolo26s.pt"
+            self.imgsz = 416
         self.model = YOLO(yolo_weights)
 
     def detect(self, frame: np.ndarray) -> tuple[np.ndarray, list[dict]]:
@@ -39,7 +42,7 @@ class Detector:
             {"label": str, "confidence": float, "bbox": [x1, y1, x2, y2]}
         Only includes relevant classes above confidence threshold.
         """
-        results = self.model(frame, verbose=False)[0]
+        results = self.model(frame, verbose=False, imgsz=self.imgsz)[0]
 
         detections = []
         for box in results.boxes:

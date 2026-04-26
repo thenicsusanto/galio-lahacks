@@ -27,7 +27,11 @@ def vlm_worker(in_queue: mp.Queue, store: EventStore):
 
         # Step 3 — build prompt and query VLM
         prompt = build_prompt(detections, history)
-        description = query_vlm(frame, prompt)
+        try:
+            description = query_vlm([frame], prompt)
+        except Exception as exc:
+            print(f"[{camera_id}] vlm error: {exc}")
+            continue
 
         # Step 4 — attach description back to the event in the store
         store.set_description(camera_id, timestamp, description)

@@ -48,7 +48,7 @@ function PipelineCamTile({
     >
       {/* Real MJPEG stream */}
       <img
-        src={`/video_feed/${cameraId}`}
+        src={`/video_feed/${cameraId}?raw=1`}
         className="block w-full aspect-video object-cover"
         alt={cameraId}
         style={{ imageRendering: 'auto', background: '#07090e' }}
@@ -220,7 +220,7 @@ export function CameraGrid({
         <div className="flex-1 p-3 min-h-0" onDoubleClick={() => setFocusedLiveCam(null)}>
           <div className="h-full overflow-hidden" style={{ clipPath: 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))', border: '1.5px solid #34d39944' }}>
             <img
-              src={`/video_feed/${focusedLiveCam}`}
+              src={`/video_feed/${focusedLiveCam}?raw=0`}
               className="block w-full h-full object-cover"
               alt={focusedLiveCam}
               style={{ background: '#07090e' }}

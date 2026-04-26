@@ -19,14 +19,13 @@ def _load_model_cfg() -> dict:
 
 _cfg = _load_model_cfg()
 VLLM_URL  = _cfg.get("vlm_url",   "http://localhost:8000/v1/chat/completions")
-VLM_MODEL = _cfg.get("vlm_model", "Qwen/Qwen2.5-VL-7B-Instruct")
+VLM_MODEL = _cfg.get("vlm_model", "nvidia/cosmos-reason2-2b")
 STUB_MODE = False  # set True if vLLM is not available
 
 
 def frame_to_base64(frame: np.ndarray) -> str:
-    # Aggressively resize to speed up VLM processing (fewer visual tokens)
     h, w = frame.shape[:2]
-    max_dim = 512  # Downscale to 512px max dimension for lower token count
+    max_dim = 512
     if max(h, w) > max_dim:
         scale = max_dim / max(h, w)
         frame = cv2.resize(frame, (int(w * scale), int(h * scale)))
@@ -35,33 +34,57 @@ def frame_to_base64(frame: np.ndarray) -> str:
     return base64.b64encode(buffer).decode("utf-8")
 
 
-def query_vlm(frames: list[np.ndarray], prompt: str) -> str:
+def query_vlm(frames: list[np.ndarray], prompt: dict) -> str:
+    """
+    prompt: dict with 'system' and 'user' keys, as returned by build_prompt()
+    """
     if STUB_MODE:
         return "[stub] Person detected near entrance, behavior appears normal."
 
-    content = [{"type": "text", "text": prompt}]
-    for i, frame in enumerate(frames):
-        image_b64 = frame_to_base64(frame)
-        content.append({"type": "text", "text": f"Frame {i+1}:"})
-        content.append({
+    frames = frames[:6]
+
+    image_blocks = [
+        {
             "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
-        })
+            "image_url": {"url": f"data:image/jpeg;base64,{frame_to_base64(f)}"},
+        }
+        for f in frames
+    ]
+
+    messages = [
+        {
+            "role": "system",
+            "content": prompt["system"],
+        },
+        {
+            "role": "user",
+            "content": [
+                *image_blocks,
+                {"type": "text", "text": prompt["user"]},
+            ],
+        },
+    ]
 
     payload = {
         "model": VLM_MODEL,
-        "max_tokens": 100,  # Cap output to finish generating faster
-        "messages": [
-            {
-                "role": "user",
-                "content": content,
-            }
-        ],
+        "messages": messages,
+        "max_tokens": 150,
+        "temperature": 0.1,
+        "top_p": 0.9,
     }
 
+    response = None
     try:
-        response = requests.post(VLLM_URL, json=payload, timeout=30)
+        response = requests.post(VLLM_URL, json=payload, timeout=60)
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        return f"[vlm error] {e}"
+        result = response.json()["choices"][0]["message"]["content"].strip()
+        result = result.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        return result
+    except requests.exceptions.HTTPError as e:
+        print(f"--- VLM API ERROR (Status {response.status_code}) ---")
+        try:
+            print(json.dumps(response.json(), indent=2))
+        except Exception:
+            print(response.text)
+        print("----------------------------------------------")
+        raise e
