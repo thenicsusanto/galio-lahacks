@@ -60,21 +60,25 @@ function Row({ label, description, children }: { label: string; description?: st
   );
 }
 
-export function SettingsView({ 
-  showBboxes, 
+export function SettingsView({
+  showBboxes,
   onToggleBboxes,
   showTimestamps,
   onToggleTimestamps,
-}: { 
-  showBboxes: boolean; 
+  flashOnEvent,
+  onToggleFlashOnEvent,
+}: {
+  showBboxes: boolean;
   onToggleBboxes: (v: boolean) => void;
   showTimestamps: boolean;
   onToggleTimestamps: (v: boolean) => void;
+  flashOnEvent: boolean;
+  onToggleFlashOnEvent: (v: boolean) => void;
 }) {
   const [loiterThreshold, setLoiterThreshold] = useState(120);
   const [bagThreshold, setBagThreshold] = useState(90);
   const [motionSensitivity, setMotionSensitivity] = useState(70);
-  const [alerts, setAlerts] = useState({ sound: true, flash: true, critical: true, autoflag: false });
+  const [alerts, setAlerts] = useState({ sound: true, critical: true, autoflag: false });
   const [display, setDisplay] = useState({ blur: true, scanlines: true });
 
   const toggleAlert = (k: keyof typeof alerts) => setAlerts(p => ({ ...p, [k]: !p[k] }));
@@ -109,11 +113,11 @@ export function SettingsView({
 
           {/* Alert settings */}
           <Section icon={Bell} title="Alerts">
-            <Row label="Sound on critical alerts" description="Play an audio chime for Incident-level events">
+            {/* <Row label="Sound on critical alerts" description="Play an audio chime for Incident-level events">
               <Toggle value={alerts.sound} onChange={() => toggleAlert('sound')} />
-            </Row>
+            </Row> */}
             <Row label="Flash camera border on new event" description="Highlight camera feeds when events are detected">
-              <Toggle value={alerts.flash} onChange={() => toggleAlert('flash')} />
+              <Toggle value={flashOnEvent} onChange={onToggleFlashOnEvent} />
             </Row>
             <Row label="Critical-only mode" description="Suppress info-level events from the log">
               <Toggle value={alerts.critical} onChange={() => toggleAlert('critical')} />

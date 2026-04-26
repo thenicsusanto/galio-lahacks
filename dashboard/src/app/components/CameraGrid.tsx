@@ -243,15 +243,19 @@ export function CameraGrid({
         </div>
 
         <div className="flex-1 p-3 min-h-0" onDoubleClick={() => setFocusedLiveCam(null)}>
-          <div className="h-full overflow-hidden" style={{ clipPath: 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))', border: '1.5px solid #34d39944' }}>
+          <div
+            className={`h-full overflow-hidden ${flashingCamIds.includes(parseInt(focusedLiveCam.match(/\d+/)?.[0] ?? '0', 10)) ? 'cam-flashing' : ''}`}
+            style={{ clipPath: 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))', border: '1.5px solid #34d39944' }}
+          >
             <img
-              src={`/video_feed/${focusedLiveCam}?raw=0`}
+              key={focusedLiveCam}
+              src={`/video_feed/${focusedLiveCam}?t=${Date.now()}`}
               className="block w-full h-full object-cover"
               alt={focusedLiveCam}
               style={{ background: '#07090e' }}
               onError={(e) => {
                 const img = e.currentTarget;
-                setTimeout(() => { img.src = `/video_feed/${focusedLiveCam}?raw=0&t=${Date.now()}`; }, 1500);
+                setTimeout(() => { img.src = `/video_feed/${focusedLiveCam}?t=${Date.now()}`; }, 1500);
               }}
             />
           </div>
@@ -261,7 +265,12 @@ export function CameraGrid({
           <div className="flex gap-2 px-3 pb-3 shrink-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
             {otherLiveCams.map(camId => (
               <div key={camId} className="shrink-0" style={{ width: 160 }}>
-                <PipelineCamTile cameraId={camId} selected={false} onSelect={() => setFocusedLiveCam(camId)} />
+                <PipelineCamTile
+                  cameraId={camId}
+                  flashing={flashingCamIds.includes(parseInt(camId.match(/\d+/)?.[0] ?? '0', 10))}
+                  selected={false}
+                  onSelect={() => setFocusedLiveCam(camId)}
+                />
               </div>
             ))}
           </div>
@@ -352,7 +361,7 @@ export function CameraGrid({
               <PipelineCamTile
                 key={camId}
                 cameraId={camId}
-                flashing={false}
+                flashing={flashingCamIds.includes(parseInt(camId.match(/\d+/)?.[0] ?? '0', 10))}
                 selected={false}
                 onSelect={() => setFocusedLiveCam(camId)}
               />

@@ -1,23 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Bot, Send, Bookmark, BookmarkCheck } from 'lucide-react';
-import { AlertEvent, INITIAL_EVENTS } from './cameraData';
+import { Bot, Send, Bookmark, BookmarkCheck, X, Maximize2 } from 'lucide-react';
+import { AlertEvent } from './cameraData';
 import { usePipeline } from '../hooks/usePipeline';
 
-// ─── Query responses ───────────────────────────────────────────────────────
-const CANNED: Record<string, string> = {
-  'back door':  '→ Cam 3: 1 entry at 14:18:44. Person detected, conf 96%. No tailgating.',
-  'loitering':  '→ Cam 3: Active alert since 14:19:02. Duration 4m 28s. EXIT zone. Threshold +248s.',
-  'bag':        '→ Cam 5: Unattended bag at [334,223]. Stationary 2m 01s. Flagged.',
-  'vehicle':    '→ Cam 4: 2 vehicles in Zone B. Last movement 14:21:30. Plates: AUTH-221, AUTH-304.',
-  'person':     '→ Cams 1,2,3,7: 4 detections in last 10 min. No unauthorized access.',
-};
-function getResponse(q: string) {
-  const lower = q.toLowerCase();
-  for (const [k, v] of Object.entries(CANNED)) {
-    if (lower.includes(k)) return v;
-  }
-  return '→ No matching events found in the last 10 minutes.';
-}
 
 // ─── Priority helpers ──────────────────────────────────────────────────────
 const SEV_COLOR: Record<string, string> = {
@@ -63,13 +48,13 @@ function EventRow({
   flagged,
   now,
   onToggleFlag,
-  onZoom,
+  onExpand,
 }: {
   ev: AlertEvent;
   flagged: boolean;
   now: number;
   onToggleFlag: () => void;
-  onZoom: () => void;
+  onExpand: () => void;
 }) {
   const col   = SEV_COLOR[ev.severity];
   const score = getScore(ev);
@@ -79,7 +64,7 @@ function EventRow({
 
   return (
     <div
-      onClick={onZoom}
+      onClick={onExpand}
       className="flex flex-col gap-2 px-4 py-3 cursor-pointer transition-colors group relative"
       style={{
         borderBottom: '1px solid #0e1018',
@@ -91,7 +76,7 @@ function EventRow({
           : 'transparent',
         boxShadow: flagged ? `inset 3px 0 12px ${col}22` : undefined,
       }}
-      title="Click to focus camera"
+      title="Click to expand"
     >
       {/* Row 1: Time + Camera + Flag button */}
       <div className="flex items-center justify-between">
@@ -214,6 +199,7 @@ export function IntelligencePanel({
   const [queryResult, setQueryResult] = useState<{ text: string; query: string } | null>(null);
   const [logTab, setLogTab]           = useState<LogTab>('alerts');
   const [now, setNow]                 = useState(Date.now());
+  const [expandedEvent, setExpandedEvent] = useState<AlertEvent | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30_000);
@@ -225,56 +211,51 @@ export function IntelligencePanel({
   const { events: pipelineEvents } = usePipeline();
 
   // Merge real pipeline events on top of initial seed events
-  const [localEvents, setLocalEvents] = useState<AlertEvent[]>(INITIAL_EVENTS);
+  const [localEvents, setLocalEvents] = useState<AlertEvent[]>([]);
 
-  // When pipeline events arrive, prepend them to localEvents
+  // When pipeline events arrive, add only ones not already in localEvents
   useEffect(() => {
-    if (pipelineEvents.length > 0) {
-      // pipelineEvents already de-duped and new-only from usePipeline
-      setLocalEvents(prev => [...pipelineEvents, ...prev].slice(0, 100));
-      // Notify parent about new high-severity events
-      for (const ev of pipelineEvents) {
+    if (pipelineEvents.length === 0) return;
+    setLocalEvents(prev => {
+      const existingIds = new Set(prev.map(e => e.id));
+      const newOnly = pipelineEvents.filter(e => !existingIds.has(e.id));
+      if (newOnly.length === 0) return prev;
+      for (const ev of newOnly) {
         if (ev.severity === 'critical' || ev.severity === 'warning') {
           onNewEvent(ev.cam);
         }
       }
-    }
+      return [...newOnly, ...prev].slice(0, 100);
+    });
   }, [pipelineEvents, onNewEvent]);
 
   const events = localEvents;
   const flaggedRef = useRef(flaggedEventIds);
   flaggedRef.current = flaggedEventIds;
 
+  const [isQuerying, setIsQuerying] = useState(false);
+
   const submitQuery = useCallback(async () => {
     const q = query.trim();
-    if (!q) return;
-    
-    setQueryResult({ query: q, text: 'Scanning AI archives...' });
+    if (!q || isQuerying) return;
+    setIsQuerying(true);
+    setQueryResult({ query: q, text: '' });
     setQuery('');
-    
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-      if (!res.ok) throw new Error('API error');
+      const res = await fetch('/api/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
       const data = await res.json();
-      
-      if (data && data.length > 0) {
-        const top = data[0];
-        const date = new Date(top.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
-        
-        let text = `→ ${(top.camera_id || 'UNKNOWN').toUpperCase()} @ ${date}:\n${top.description}`;
-        
-        if (data.length > 1) {
-             text += `\n\n(+ ${data.length - 1} other semantic matches found)`;
-        }
-        setQueryResult({ query: q, text });
-      } else {
-        setQueryResult({ query: q, text: '→ No matching events found in the recent archives.' });
-      }
+      setQueryResult({ query: q, text: data.answer ?? '(no response)' });
     } catch (e) {
-      console.error("Search API failed, falling back to offline demo data:", e);
-      setQueryResult({ query: q, text: getResponse(q) });
+      setQueryResult({ query: q, text: 'Agent unavailable — check that the backend is running.' });
+    } finally {
+      setIsQuerying(false);
     }
-  }, [query]);
+  }, [query, isQuerying]);
 
   const displayedEvents = (() => {
     switch (logTab) {
@@ -316,7 +297,8 @@ export function IntelligencePanel({
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && submitQuery()}
-            placeholder="Ask the archive… e.g. 'loitering in last 10 mins?'"
+            placeholder="Ask the AI… e.g. 'Any suspicious activity in the last 10 mins?'"
+            disabled={isQuerying}
             className="flex-1 bg-transparent outline-none min-w-0"
             style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: '#8a9fc0' }}
           />
@@ -333,7 +315,7 @@ export function IntelligencePanel({
           </button>
         </div>
 
-        {queryResult && (
+        {(queryResult || isQuerying) && (
           <div
             className="mt-2.5 p-3"
             style={{
@@ -342,12 +324,20 @@ export function IntelligencePanel({
               clipPath: 'polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%)',
             }}
           >
-            <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: '#c9a84c88', fontStyle: 'italic', marginBottom: 4 }}>
-              "{queryResult.query}"
-            </p>
-            <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#c9a84c', lineHeight: 1.55, textShadow: '0 0 10px #c9a84c44' }}>
-              {queryResult.text}
-            </p>
+            {queryResult && (
+              <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: '#c9a84c88', fontStyle: 'italic', marginBottom: 6 }}>
+                "{queryResult.query}"
+              </p>
+            )}
+            {isQuerying ? (
+              <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#c9a84c66', lineHeight: 1.55 }}>
+                Thinking…
+              </p>
+            ) : queryResult?.text ? (
+              <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: '#c8d8f0', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
+                {queryResult.text}
+              </p>
+            ) : null}
           </div>
         )}
       </div>
@@ -423,12 +413,142 @@ export function IntelligencePanel({
                 flagged={flaggedEventIds.includes(ev.id)}
                 now={now}
                 onToggleFlag={() => onToggleFlag(ev.id)}
-                onZoom={() => onZoomCamera(ev.camera_id || `cam_${ev.cam}`)}
+                onExpand={() => setExpandedEvent(ev)}
               />
             ))
           )}
         </div>
       </div>
+
+      {/* ── Expanded event detail overlay ─────────────────────── */}
+      {expandedEvent && (() => {
+        const ev = expandedEvent;
+        const col = SEV_COLOR[ev.severity];
+        return (
+          <>
+            {/* Backdrop */}
+            <div
+              className="absolute inset-0 z-20"
+              style={{ background: 'rgba(7,9,14,0.7)', backdropFilter: 'blur(2px)' }}
+              onClick={() => setExpandedEvent(null)}
+            />
+            {/* Panel */}
+            <div
+              className="absolute left-0 right-0 bottom-0 z-30 flex flex-col"
+              style={{
+                background: 'linear-gradient(180deg, #0f1120 0%, #0b0c14 100%)',
+                borderTop: `2px solid ${col}`,
+                boxShadow: `0 -8px 40px rgba(0,0,0,0.8), 0 0 0 1px ${col}22`,
+                maxHeight: '70%',
+              }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 shrink-0" style={{ borderBottom: '1px solid #1a1e2e' }}>
+                <div className="flex items-center gap-2">
+                  <div style={{ width: 3, height: 16, background: col, boxShadow: `0 0 8px ${col}` }} />
+                  <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: '#ccd4ea', letterSpacing: '0.02em' }}>
+                    {fmtType(ev.type)}
+                  </span>
+                  <span
+                    className="px-2 py-0.5"
+                    style={{
+                      fontFamily: "'DM Mono', monospace",
+                      fontSize: 10,
+                      color: '#7a96e8',
+                      background: 'rgba(122,150,232,0.10)',
+                      clipPath: 'polygon(4px 0%, 100% 0%, calc(100% - 4px) 100%, 0% 100%)',
+                    }}
+                  >
+                    {(ev.camera_id || `cam_${ev.cam}`).toUpperCase().replace(/_/g, '-')}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {/* Flag */}
+                  <button
+                    onClick={() => onToggleFlag(ev.id)}
+                    style={{ background: 'none', border: 'none', padding: 4, cursor: 'pointer', display: 'flex' }}
+                  >
+                    {flaggedEventIds.includes(ev.id)
+                      ? <BookmarkCheck size={15} color="#e8a840" />
+                      : <Bookmark size={15} color="#48607a" />}
+                  </button>
+                  {/* Zoom to camera */}
+                  <button
+                    onClick={() => { onZoomCamera(ev.camera_id || `cam_${ev.cam}`); setExpandedEvent(null); }}
+                    title="Focus camera"
+                    style={{ background: 'none', border: 'none', padding: 4, cursor: 'pointer', display: 'flex' }}
+                  >
+                    <Maximize2 size={14} color="#48607a" />
+                  </button>
+                  {/* Close */}
+                  <button
+                    onClick={() => setExpandedEvent(null)}
+                    style={{ background: 'none', border: 'none', padding: 4, cursor: 'pointer', display: 'flex' }}
+                  >
+                    <X size={15} color="#48607a" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="overflow-y-auto p-4 flex flex-col gap-3" style={{ scrollbarWidth: 'thin' }}>
+                {/* Meta row */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#4a6080' }}>
+                    {ev.timestamp ? fmtRelative(ev.timestamp, now) : ev.time}
+                  </span>
+                  <span
+                    className="px-1.5 py-0.5"
+                    style={{
+                      fontFamily: "'DM Mono', monospace",
+                      fontSize: 9.5,
+                      color: col,
+                      background: `${col}15`,
+                      clipPath: 'polygon(4px 0%, 100% 0%, calc(100% - 4px) 100%, 0% 100%)',
+                      letterSpacing: '0.06em',
+                    }}
+                  >
+                    {getPriorityLabel(ev)}
+                  </span>
+                </div>
+
+                {/* Full rationale */}
+                {ev.details && (
+                  <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: '#9ab0cc', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+                    {ev.details}
+                  </p>
+                )}
+
+                {/* Detections */}
+                {ev.detections && ev.detections.length > 0 && (
+                  <div>
+                    <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: '#3e5272', marginBottom: 6, letterSpacing: '0.06em' }}>
+                      DETECTIONS
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {ev.detections.map((d, i) => (
+                        <span
+                          key={i}
+                          style={{
+                            fontFamily: "'DM Mono', monospace",
+                            fontSize: 10.5,
+                            color: '#7a96e8',
+                            background: 'rgba(122,150,232,0.08)',
+                            border: '1px solid rgba(122,150,232,0.15)',
+                            padding: '2px 7px',
+                          }}
+                        >
+                          {d.label} {(d.confidence * 100).toFixed(0)}%
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        );
+      })()}
     </aside>
   );
 }

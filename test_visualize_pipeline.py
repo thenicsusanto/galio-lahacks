@@ -37,7 +37,8 @@ from layer1_ingest.ingest import load_config, start_ingest
 from layer1_ingest.worker import ingest_worker
 from layer2_detection.worker import detection_worker
 from layer3_vlm.prompt import build_prompt
-from layer3_vlm.vlm import query_vlm
+from layer3_vlm.vlm import query_vlm, VLLM_URL, VLM_MODEL
+import requests
 from layer4_aggregator.event_store import EventStore
 
 # ---------------------------------------------------------------------------
@@ -189,6 +190,12 @@ def detection_fanout_worker(raw_q: mp.Queue):
         if ret:
             with _jpeg_cache_lock:
                 _jpeg_cache[cam] = jpeg_buf.tobytes()
+
+        # Route item to per-camera queue for VLM processing
+        try:
+            _per_cam_detect_q[cam].put_nowait(item)
+        except queue.Full:
+            pass  # drop frame if feeder is behind
 
 
 # ---------------------------------------------------------------------------
@@ -450,8 +457,11 @@ class StreamingHandler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
-        if self.path.split("?")[0] == "/api/cameras":
+        path = self.path.split("?")[0]
+        if path == "/api/cameras":
             self._add_camera()
+        elif path == "/api/agent":
+            self._serve_agent()
         else:
             self.send_error(404)
 
@@ -613,6 +623,96 @@ class StreamingHandler(BaseHTTPRequestHandler):
         ]
         self._json_response(200, clean)
 
+    def _serve_agent(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        try:
+            query = json.loads(body).get("query", "").strip()
+        except Exception:
+            self._json_response(400, {"error": "invalid JSON"})
+            return
+        if not query:
+            self._json_response(400, {"error": "query required"})
+            return
+
+        # Build context from event store (last 10 minutes)
+        events = _api_store.get_all_recent(seconds=600) if _api_store else []
+        now = time.time()
+
+        # Format events into readable lines, newest first, only ones with VLM output
+        event_lines = []
+        for ev in reversed(events):
+            raw_desc = ev.get("description") or ""
+            if not raw_desc:
+                continue
+            try:
+                d = json.loads(raw_desc)
+                category  = d.get("category", "Unknown")
+                score     = d.get("anomaly_score", 0)
+                rationale = d.get("rationale", "")
+                action    = d.get("action_required", "Log")
+            except Exception:
+                category, score, rationale, action = "Unknown", 0, raw_desc, "Log"
+
+            seconds_ago = int(now - ev["timestamp"])
+            if seconds_ago < 60:
+                when = f"{seconds_ago}s ago"
+            else:
+                when = f"{seconds_ago // 60}m{seconds_ago % 60:02d}s ago"
+
+            dets = ev.get("detections", [])
+            det_summary = ", ".join(
+                f"{d['label']} ({d['confidence']:.0%})" for d in dets
+            ) if dets else "no detections"
+
+            event_lines.append(
+                f"[{when}] {ev['camera_id']} | category={category} score={score:.2f} "
+                f"action={action} | detections: {det_summary} | {rationale}"
+            )
+
+        with _cameras_lock:
+            camera_list = list(_managed_cameras.keys())
+
+        context_block = "\n".join(event_lines) if event_lines else "No VLM-analysed events in the last 10 minutes."
+
+        system_prompt = (
+            "You are a concise security monitoring assistant. "
+            "You have access to a log of recent security camera events analysed by an AI vision model. "
+            "Each event includes the camera, time, detected category, anomaly score (0=normal, 1=critical), "
+            "action required, YOLO detections, and a rationale. "
+            "Answer the operator's question directly and concisely. "
+            "Prioritise high-score or Immediate-action events. "
+            "If there is nothing notable, say so clearly."
+        )
+
+        user_prompt = (
+            f"Current time: {time.strftime('%H:%M:%S')}\n"
+            f"Active cameras: {', '.join(camera_list) if camera_list else 'none'}\n\n"
+            f"Recent event log (newest first):\n{context_block}\n\n"
+            f"Operator question: {query}"
+        )
+
+        payload = {
+            "model": VLM_MODEL,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_prompt},
+            ],
+            "max_tokens": 300,
+            "temperature": 0.2,
+        }
+
+        try:
+            print(f"[agent] query: {query!r}")
+            resp = requests.post(VLLM_URL, json=payload, timeout=30)
+            resp.raise_for_status()
+            answer = resp.json()["choices"][0]["message"]["content"].strip()
+            print(f"[agent] response: {answer[:120]}...")
+            self._json_response(200, {"answer": answer})
+        except Exception as exc:
+            print(f"[agent] error: {exc}")
+            self._json_response(500, {"error": str(exc)})
+
     def _serve_mjpeg(self, path: str):
         """Serve pre-encoded JPEG bytes; zero encoding work in this thread."""
         # MJPEG is a long-lived loop — demote to low pool immediately so it
@@ -646,6 +746,7 @@ class StreamingHandler(BaseHTTPRequestHandler):
                         + jpeg
                         + b"\r\n"
                     )
+                    self.wfile.flush()
 
                 time.sleep(0.033)  # ~30 fps ceiling for MJPEG clients
         except Exception:
@@ -882,7 +983,7 @@ def run_server():
     prevents them from ever consuming pool slots needed by the real API.
     """
     priority_pool = ThreadPoolExecutor(max_workers=12, thread_name_prefix="http-api")
-    low_pool      = ThreadPoolExecutor(max_workers=4,  thread_name_prefix="http-low")
+    low_pool      = ThreadPoolExecutor(max_workers=8,  thread_name_prefix="http-low")
 
     class PrioritizedHTTPServer(ThreadingHTTPServer):
         def __init__(self, *args, **kwargs):

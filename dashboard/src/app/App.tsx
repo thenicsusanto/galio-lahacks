@@ -15,6 +15,7 @@ export default function App() {
   const [flashingCamIds, setFlashingCamIds] = useState<number[]>([]);
   const [showBboxes, setShowBboxes] = useState(false);
   const [showTimestamps, setShowTimestamps] = useState(true);
+  const [flashOnEvent, setFlashOnEvent] = useState(true);
 
   useEffect(() => {
     fetch('/api/settings', {
@@ -25,11 +26,12 @@ export default function App() {
   }, [showBboxes]);
 
   const handleNewEvent = useCallback((camId: number) => {
+    if (!flashOnEvent) return;
     setFlashingCamIds(prev => Array.from(new Set([...prev, camId])));
     setTimeout(() => {
       setFlashingCamIds(prev => prev.filter(id => id !== camId));
     }, 6000);
-  }, []);
+  }, [flashOnEvent]);
 
   const toggleFlag = useCallback((eventId: number) => {
     setFlaggedEventIds(prev =>
@@ -115,11 +117,13 @@ export default function App() {
       )}
       {activeNav === 'cameras' && <ManageCameras />}
       {activeNav === 'settings' && (
-        <SettingsView 
-          showBboxes={showBboxes} 
-          onToggleBboxes={setShowBboxes} 
+        <SettingsView
+          showBboxes={showBboxes}
+          onToggleBboxes={setShowBboxes}
           showTimestamps={showTimestamps}
           onToggleTimestamps={setShowTimestamps}
+          flashOnEvent={flashOnEvent}
+          onToggleFlashOnEvent={setFlashOnEvent}
         />
       )}
     </div>
